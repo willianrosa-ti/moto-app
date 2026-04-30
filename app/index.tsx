@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage'; // <-- A nova memória do celular!
+import { useRouter } from 'expo-router';
 
 export default function App() {
+  const router = useRouter();
   const [telefone, setTelefone] = useState('');
   const [placa, setPlaca] = useState('');
   const [senha, setSenha] = useState('');
@@ -35,7 +37,15 @@ export default function App() {
         await AsyncStorage.setItem('idMotorista', dados.motorista.id.toString());
         
         // 3. Mostramos o sucesso na tela (depois vamos trocar isso pela navegação para o Radar)
-        Alert.alert("Sucesso!", `Bem-vindo(a), ${dados.motorista.nome}! O banco de dados conectou!`);
+        if (resposta.ok) {
+        // Deu certo! Salvamos o Token e os dados na memória do celular
+        await AsyncStorage.setItem('tokenMotorista', dados.token);
+        await AsyncStorage.setItem('nomeMotorista', dados.motorista.nome);
+        await AsyncStorage.setItem('idMotorista', dados.motorista.id.toString());
+        
+        // MUDE DE TELA AQUI:
+        router.replace('/radar' as any); // O 'replace' faz com que o botão de voltar do celular não volte pro login
+      }
       } else {
         // Erro de senha ou usuário retornado pela sua API
         Alert.alert("Erro ao entrar", dados.mensagem);
@@ -55,7 +65,7 @@ export default function App() {
           <View style={styles.logoBox}>
             <Text style={styles.logoLetter}>T</Text>
           </View>
-          <Text style={styles.agencyName}>MOTO-THALES</Text>
+          <Text style={styles.agencyName}>MOTO-TAXI THALES</Text>
           <Text style={styles.agencySubtitle}>Área do Mototaxista</Text>
         </View>
 
@@ -88,7 +98,7 @@ export default function App() {
             <Text style={styles.inputLabel}>Senha</Text>
             <TextInput 
               style={styles.inputField}
-              placeholder="••••••••"
+              placeholder="Digite sua senha"
               value={senha}
               onChangeText={setSenha}
               secureTextEntry={true} 
