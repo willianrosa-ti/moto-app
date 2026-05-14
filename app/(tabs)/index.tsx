@@ -1,11 +1,30 @@
-import { useState } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert } from 'react-native';
+import { useState, useEffect } from 'react';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage'; // <-- A nova memória do celular!
+import { Ionicons } from '@expo/vector-icons'; // <-- Ícones para a caixinha
+import { useRouter } from 'expo-router'; // <-- Ferramenta para trocar de tela
 
 export default function App() {
+  const navegar = useRouter();
   const [telefone, setTelefone] = useState('');
   const [placa, setPlaca] = useState('');
   const [senha, setSenha] = useState('');
+  
+  // NOVOS ESTADOS: Caixinha de manter logado e indicador de carregamento
+  const [manterConectado, setManterConectado] = useState(false);
+  const [carregando, setCarregando] = useState(false);
+
+  // O RADAR AUTOMÁTICO: Roda toda vez que o app é aberto
+  useEffect(() => {
+    const verificarLoginSalvo = async () => {
+      const token = await AsyncStorage.getItem('tokenMotorista');
+      if (token) {
+        // Se achou o crachá na memória, pula direto para a página do radar!
+        navegar.replace('/radar'); // Troque '/radar' pelo nome exato do seu arquivo da próxima tela se necessário
+      }
+    };
+    verificarLoginSalvo();
+  }, []);
 
   const handleLogin = async () => {
     // Validação básica para não mandar vazio
@@ -14,15 +33,18 @@ export default function App() {
       return;
     }
 
+    setCarregando(true);
+
     try {
-      // 1. Chamando a sua API no C# usando o IP da sua máquina
+      // 1. Chamando a sua API no C# usando o link do Azure
       const resposta = await fetch('https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Autenticacao/login-motorista', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
             telefone: telefone, 
             placaMoto: placa, 
-            senha: senha 
+            senha: senha,
+            lembrarMe: manterConectado // <-- Avisa a API se é para durar 30 dias ou 8 horas
         })
       });
 
@@ -34,8 +56,9 @@ export default function App() {
         await AsyncStorage.setItem('nomeMotorista', dados.motorista.nome);
         await AsyncStorage.setItem('idMotorista', dados.motorista.id.toString());
         
-        // 3. Mostramos o sucesso na tela (depois vamos trocar isso pela navegação para o Radar)
-        Alert.alert("Sucesso!", `Bem-vindo(a), ${dados.motorista.nome}! O banco de dados conectou!`);
+        // 3. Pula a etapa do login e vai direto para o radar
+        Alert.alert("Sucesso!", `Bem-vindo(a), ${dados.motorista.nome}!`);
+        navegar.replace('/radar'); 
       } else {
         // Erro de senha ou usuário retornado pela sua API
         Alert.alert("Erro ao entrar", dados.mensagem);
@@ -43,6 +66,8 @@ export default function App() {
     } catch (erro) {
       console.error("Erro na comunicação:", erro);
       Alert.alert("Sem Conexão", "Não foi possível conectar ao servidor. A sua API em C# está ligada?");
+    } finally {
+      setCarregando(false);
     }
   };
 
@@ -95,8 +120,26 @@ export default function App() {
             />
           </View>
 
-          <TouchableOpacity style={styles.button} onPress={handleLogin}>
-            <Text style={styles.buttonText}>ENTRAR</Text>
+          {/* NOVA CAIXINHA: MANTER-ME CONECTADO */}
+          <TouchableOpacity 
+            style={styles.caixaLembrarMe} 
+            activeOpacity={0.7}
+            onPress={() => setManterConectado(!manterConectado)}
+          >
+            <Ionicons 
+              name={manterConectado ? "checkbox" : "square-outline"} 
+              size={24} 
+              color="#28a745" 
+            />
+            <Text style={styles.textoLembrarMe}>Manter-me conectado</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={carregando}>
+            {carregando ? (
+              <ActivityIndicator color="#ffffff" />
+            ) : (
+              <Text style={styles.buttonText}>ENTRAR</Text>
+            )}
           </TouchableOpacity>
 
         </View>
@@ -198,5 +241,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     letterSpacing: 1,
+  },
+  // ESTILOS ADICIONADOS PARA A CAIXINHA
+  caixaLembrarMe: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    marginTop: -5,
+  },
+  textoLembrarMe: {
+    marginLeft: 8,
+    fontSize: 14,
+    color: '#4b5563',
+    fontWeight: 'bold',
   }
 });
