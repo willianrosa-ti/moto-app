@@ -42,7 +42,7 @@ export default function Radar() {
 
       const mesAtual = new Date().getMonth() + 1; 
       
-      const resposta = await fetch(`http://192.168.15.6:5022/api/Motorista/financeiro?filtro=hoje&mes=${mesAtual}`, {
+      const resposta = await fetch(`https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Motorista/financeiro?filtro=hoje&mes=${mesAtual}`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -90,7 +90,7 @@ export default function Radar() {
           if (statusOnlineRef.current) {
             try {
               const token = await AsyncStorage.getItem('tokenMotorista');
-              await fetch('http://192.168.15.6:5022/api/Motorista/atualizar-localizacao', {
+              await fetch('https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Motorista/atualizar-localizacao', {
                 method: 'POST',
                 headers: { 
                   'Content-Type': 'application/json',
@@ -157,7 +157,7 @@ export default function Radar() {
 
   useEffect(() => {
     const conexao = new signalR.HubConnectionBuilder()
-      .withUrl("http://192.168.15.6:5022/hub-corridas")
+      .withUrl("https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/hub-corridas")
       .withAutomaticReconnect()
       .build();
 
@@ -185,7 +185,7 @@ export default function Radar() {
 
       try {
         const token = await AsyncStorage.getItem('tokenMotorista'); 
-        const resposta = await fetch('http://192.168.15.6:5022/api/Corrida/pendentes', {
+        const resposta = await fetch('https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Corrida/pendentes', {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${token}` 
@@ -265,7 +265,7 @@ export default function Radar() {
     const token = await AsyncStorage.getItem('tokenMotorista');
 
     try {
-      const resposta = await fetch('http://192.168.15.6:5022/api/Motorista/alterar-status-online', {
+      const resposta = await fetch('https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Motorista/alterar-status-online', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -306,7 +306,7 @@ export default function Radar() {
     try {
       const token = await AsyncStorage.getItem('tokenMotorista');
       
-      const resposta = await fetch(`http://192.168.15.6:5022/api/Corrida/aceitar/${corridaAlvo.id}`, {
+      const resposta = await fetch(`https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Corrida/aceitar/${corridaAlvo.id}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -332,7 +332,7 @@ export default function Radar() {
     try {
       const token = await AsyncStorage.getItem('tokenMotorista');
       
-      const resposta = await fetch(`http://192.168.15.6:5022/api/Corrida/finalizar/${corridaRecebida.id}`, {
+      const resposta = await fetch(`https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Corrida/finalizar/${corridaRecebida.id}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`

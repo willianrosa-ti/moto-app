@@ -36,11 +36,11 @@ export default function FinanceiroMotorista() {
 
       // 2. Prepara a rota da API. 
       // ⚠️ ATENÇÃO: No Expo, 'localhost' não funciona. Troque "192.168.X.X" pelo IP IPv4 do seu computador na rede Wi-Fi!
-      const ip ="192.168.15.6"; 
+      const ip ="192.168.1.46"; 
       
       // O mês no JavaScript vai de 0 a 11, mas para o C# mandamos de 1 a 12.
       const mesParaEnviar = mesSelecionado + 1; 
-      const url = `http://${ip}:5022/api/Motorista/financeiro?filtro=${filtro}&mes=${mesParaEnviar}`;
+      const url = `http://${ip}:motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Motorista/financeiro?filtro=${filtro}&mes=${mesParaEnviar}`;
 
       // 3. Faz a chamada passando o Token no cabeçalho
       const resposta = await fetch(url, {
