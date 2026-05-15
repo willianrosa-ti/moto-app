@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, Animated, Easing, ScrollView, Modal, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, Animated, Easing, ScrollView, Modal, Dimensions, TouchableWithoutFeedback, StatusBar } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import * as signalR from '@microsoft/signalr';
@@ -8,6 +8,17 @@ import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons'; 
 
 const ficheiroBuzina = require('../../assets/sounds/buzina.mp3');
+
+// --- SÍMBOLO MIL-LIN (Notebook CSS traduzido para React Native) ---
+const SimboloMilLin = () => (
+  <View style={milLinStyles.containerLogo}>
+    {/* Parte de Cima do Notebook (Tela) */}
+    <View style={milLinStyles.notebookTela} />
+    
+    {/* Parte de Baixo do Notebook (Teclado/Base) */}
+    <View style={milLinStyles.notebookBase} />
+  </View>
+);
 
 export default function Radar() {
   const [statusOnline, setStatusOnline] = useState(false);
@@ -26,6 +37,9 @@ export default function Radar() {
   const [modoVisualizacao, setModoVisualizacao] = useState<'radar' | 'lista'>('radar');
   const [corridasDisponiveis, setCorridasDisponiveis] = useState<any[]>([]);
 
+  // NOVO ESTADO: Controla a tela de carregamento/transição da MIL-LIN
+  const [processandoAcesso, setProcessandoAcesso] = useState(false);
+
   const corridasIgnoradas = useRef<any[]>([]); 
   const corridaAceitaRef = useRef(false);
   const statusOnlineRef = useRef(false);
@@ -33,6 +47,52 @@ export default function Radar() {
 
   const animacaoRadar = useRef(new Animated.Value(0)).current;
   const navegar = useRouter();
+
+  // --- NOVA FUNÇÃO PARA GERENCIAR CLIQUES NO MENU COM TRANSIÇÃO ---
+  const executarAcaoMenu = (acao: 'financeiro' | 'suporte') => {
+    setMenuAberto(false); // Fecha o menu lateral
+    setProcessandoAcesso(true); // Abre a tela de carregamento
+
+    setTimeout(() => {
+      setProcessandoAcesso(false); // Esconde o carregamento após 3s
+      if (acao === 'financeiro') {
+        navegar.push('/radar/financeiro');
+      } else if (acao === 'suporte') {
+        setModalCorridasAberto(true);
+      }
+    }, 1000);
+  };
+
+  // --- NOVA FUNÇÃO DE SAIR (LOGOUT) ---
+  const fazerLogout = async () => {
+    Alert.alert(
+      "Sair do App",
+      "Tem certeza que deseja desconectar sua conta?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        { 
+          text: "Sair", 
+          style: "destructive",
+          onPress: async () => {
+            try {
+              // Limpa a memória do celular
+              await AsyncStorage.removeItem('tokenMotorista');
+              await AsyncStorage.removeItem('nomeMotorista');
+              await AsyncStorage.removeItem('idMotorista');
+              
+              setStatusOnline(false); // Desliga o radar por segurança
+              setMenuAberto(false);
+              
+              // Substitua '/' pela rota do seu arquivo de Login, caso seja diferente
+              navegar.replace('/'); 
+            } catch (erro) {
+              Alert.alert("Erro", "Não foi possível sair.");
+            }
+          }
+        }
+      ]
+    );
+  };
 
   // --- INÍCIO DA INTEGRAÇÃO COM O BANCO PARA OS GANHOS ---
   const buscarGanhosDoDia = async () => {
@@ -241,7 +301,7 @@ export default function Radar() {
     if (statusOnline) {
       buscarCorridasReais(); 
       // CORREÇÃO DO TEMPO DE BUSCA (de 25000 para 5000 - 5 segundos)
-      intervaloVida = setInterval(buscarCorridasReais, 5000); 
+      intervaloVida = setInterval(buscarCorridasReais, 1500); 
     }
 
     return () => clearInterval(intervaloVida);
@@ -368,6 +428,26 @@ export default function Radar() {
   const sonarScale = animacaoRadar.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.5] });
   const sonarOpacity = animacaoRadar.interpolate({ inputRange: [0, 1], outputRange: [0.8, 0] });
 
+  // ==========================================
+  // --- RENDERIZAÇÃO DA TELA DE CARREGAMENTO MIL-LIN ---
+  // ==========================================
+  if (processandoAcesso) {
+    return (
+      <View style={milLinStyles.telaCarregamento}>
+        <StatusBar backgroundColor="#1f2937" barStyle="light-content" />
+        
+        {/* Logo em branco "MIL-LIN" (como você pediu, em branco em cima do notebook) */}
+        <Text style={milLinStyles.tituloMilLinBranco}>M I L - L I N</Text>
+        
+        {/* Recriação do Símbolo em CSS */}
+        <SimboloMilLin />
+        
+        {/* Texto "CARREGANDO..." em baixo */}
+        <Text style={milLinStyles.textoCarregando}>C  A  R  R  E  G  A  N  D  O...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.telaRadar}>
       <View style={styles.cabecalhoRadar}>
@@ -406,33 +486,55 @@ export default function Radar() {
         </View>
       </View>
 
-      <Modal visible={menuAberto} transparent={true} animationType="fade">
-        <View style={styles.fundoModal}>
-          <View style={styles.caixaMenu}>
-            <TouchableOpacity style={styles.fecharMenu} onPress={() => setMenuAberto(false)}>
-              <Text style={styles.textoFechar}>X</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.itemMenu} onPress={() => { setMenuAberto(false); navegar.push('/radar/financeiro'); }}>
-              <Text style={styles.textoItemMenu}>Financeiro</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.itemMenu} onPress={() => { setMenuAberto(false); setModalCorridasAberto(true); }}>
-              <Text style={styles.textoItemMenu}>Corridas Disponíveis</Text>
-            </TouchableOpacity>
+      {/* --- MENU MODERNO COM CLIQUE FORA E BOTÃO SAIR --- */}
+      <Modal 
+        visible={menuAberto} 
+        transparent={true} 
+        animationType="fade"
+        onRequestClose={() => setMenuAberto(false)} // Fecha ao apertar botão voltar do Android
+      >
+        <TouchableWithoutFeedback onPress={() => setMenuAberto(false)}>
+          <View style={styles.fundoModal}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <View style={styles.caixaMenu}>
+                
+                <Text style={styles.tituloMenu}>RECURSOS</Text>
+                <View style={styles.linhaSeparadoraMenu} />
+                
+                {/* Alterado para chamar a função com a transição MIL-LIN */}
+                <TouchableOpacity style={styles.itemMenu} onPress={() => executarAcaoMenu('financeiro')}>
+                  <Ionicons name="cash-outline" size={20} color="#28a745" />
+                  <Text style={styles.textoItemMenu}>Financeiro</Text>
+                </TouchableOpacity>
+                
+                {/* Alterado o ícone e chamando a transição MIL-LIN */}
+                <TouchableOpacity style={styles.itemMenu} onPress={() => executarAcaoMenu('suporte')}>
+                  <Ionicons name="headset-outline" size={20} color="#28a745" />
+                  <Text style={styles.textoItemMenu}>SUPORTE TECNICO</Text>
+                </TouchableOpacity>
+
+                {/* BOTÃO DE SAIR ADICIONADO AQUI */}
+                <TouchableOpacity style={styles.itemMenuSair} onPress={fazerLogout}>
+                  <Ionicons name="log-out-outline" size={20} color="#dc3545" />
+                  <Text style={styles.textoItemMenuSair}>Sair</Text>
+                </TouchableOpacity>
+
+              </View>
+            </TouchableWithoutFeedback>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
       <Modal visible={modalCorridasAberto} animationType="slide">
         <View style={styles.telaCorridasDisponiveis}>
           <View style={styles.cabecalhoModal}>
-            <Text style={styles.tituloModal}>Corridas Disponíveis</Text>
+            <Text style={styles.tituloModal}>SUPORTE TECNICO</Text>
             <TouchableOpacity onPress={() => setModalCorridasAberto(false)}>
-              <Text style={styles.textoFechar}>Voltar</Text>
+              <Text style={styles.textoFecharBranco}>Voltar</Text>
             </TouchableOpacity>
           </View>
-          <Text style={styles.textoVazio}>Nenhuma corrida na lista geral no momento.</Text>
+          <Text style={styles.textoVazio}>Whatsapp: 44997740967.</Text>
+          <Text style={styles.textoVazio}>ENTRE EM CONTATO COM NOSSO NÚMERO WHATSAPP E FALE SEU PROBLEMA.</Text>
         </View>
       </Modal>
 
@@ -632,12 +734,64 @@ const styles = StyleSheet.create({
   linhaValorVisibilidade: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 15 },
   valorGanhos: { fontSize: 20, fontWeight: '900', color: '#28a745' },
   botaoOlho: { padding: 0 },
+  
+  // --- NOVOS ESTILOS DO MENU ---
   fundoModal: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-start', alignItems: 'flex-end' },
-  caixaMenu: { backgroundColor: '#fff', width: 200, marginTop: 60, marginRight: 15, borderRadius: 10, padding: 15, elevation: 5 },
-  fecharMenu: { alignSelf: 'flex-end', marginBottom: 10 },
-  textoFechar: { fontSize: 18, color: '#d32f2f', fontWeight: 'bold' },
-  itemMenu: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee' },
-  textoItemMenu: { fontSize: 16, color: '#333', fontWeight: 'bold' },
+  caixaMenu: { 
+    backgroundColor: '#ffffff', 
+    width: 230, 
+    marginTop: 101, 
+    marginRight: 15, 
+    borderRadius: 15, 
+    paddingVertical: 20, 
+    paddingHorizontal: 15,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5
+  },
+  tituloMenu: {
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#a0a0a0',
+    letterSpacing: 1.5,
+    marginBottom: 10,
+  },
+  linhaSeparadoraMenu: {
+    height: 1,
+    backgroundColor: '#f0f0f0',
+    marginBottom: 10,
+  },
+  itemMenu: { 
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14, 
+    borderBottomWidth: 1, 
+    borderBottomColor: '#f9f9f9' 
+  },
+  textoItemMenu: { 
+    fontSize: 16, 
+    color: '#333', 
+    fontWeight: '700',
+    marginLeft: 12
+  },
+  itemMenuSair: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14, 
+    marginTop: 5,
+  },
+  textoItemMenuSair: {
+    fontSize: 16, 
+    color: '#dc3545', 
+    fontWeight: 'bold',
+    marginLeft: 12
+  },
+  // --- FIM DOS ESTILOS DO MENU ---
+
+  textoFecharBranco: { fontSize: 16, color: '#fff', fontWeight: 'bold' },
   telaCorridasDisponiveis: { flex: 1, backgroundColor: '#fff' },
   cabecalhoModal: { flexDirection: 'row', justifyContent: 'space-between', padding: 20, backgroundColor: '#28a745', alignItems: 'center' },
   tituloModal: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
@@ -773,4 +927,64 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 15,
   },
+});
+
+// ==========================================
+// --- NOVOS ESTILOS DO SÍMBOLO MIL-LIN ---
+// ==========================================
+const milLinStyles = StyleSheet.create({
+  telaCarregamento: {
+    flex: 1,
+    backgroundColor: '#1f2937', 
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tituloMilLinBranco: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    color: '#ffffff', 
+    letterSpacing: 2,
+    marginBottom: 20, 
+  },
+  textoCarregando: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#e8f5e9', 
+    letterSpacing: 3, 
+    marginTop: 280, 
+  },
+  containerLogo: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notebookTela: {
+    width: 100,
+    height: 50,
+    backgroundColor: 'white',
+    borderRadius: 8, 
+    marginTop: 0,
+    marginHorizontal: 0,
+    shadowColor: 'rgba(214, 234, 248, 0.699)',
+    shadowOffset: { width: 1, height: 1 },
+    shadowOpacity: 1,
+    shadowRadius: 13,
+    elevation: 5, 
+  },
+  notebookBase: {
+    width: 108,
+    height: 15,
+    backgroundColor: 'white',
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 100,
+    borderBottomRightRadius: 0,
+    borderBottomLeftRadius: 100,
+    marginLeft: 10,
+    marginTop: 1,
+    marginBottom: 15,
+    shadowColor: '#1a1717',
+    shadowOffset: { width: 3, height: 11 },
+    shadowOpacity: 0.8,
+    shadowRadius: 11,
+    elevation: 10, 
+  }
 });
