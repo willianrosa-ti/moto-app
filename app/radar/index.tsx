@@ -119,8 +119,36 @@ export default function Radar() {
     }
   };
 
+  // --- NOVA FUNÇÃO: VERIFICAR E RECUPERAR CORRIDA ATIVA ---
+  const verificarCorridaAtiva = async () => {
+    try {
+      const token = await AsyncStorage.getItem('tokenMotorista');
+      if (!token) return;
+
+      const resposta = await fetch('https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Corrida/ativa', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (resposta.status === 200) {
+        const corrida = await resposta.json();
+        if (corrida) {
+          setCorridaRecebida(corrida); // Puxa os dados para a tela
+          setCorridaAceita(true);      // Força o app a abrir a tela de "EM CORRIDA"
+          setStatusOnline(true);       // Liga o radar para o GPS continuar rastreando
+        }
+      }
+    } catch (erro) {
+      console.log("Erro ao recuperar corrida ativa:", erro);
+    }
+  };
+
   useEffect(() => {
     buscarGanhosDoDia();
+    verificarCorridaAtiva(); // <-- Adicionamos a checagem logo ao abrir o App
   }, []);
   // --- FIM DA INTEGRAÇÃO ---
 
