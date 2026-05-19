@@ -50,7 +50,8 @@ export default function App() {
 
     try {
       // 1. Chamando a sua API no C# usando o link do Azure
-      const resposta = await fetch('https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Autenticacao/login-motorista', {
+      // Ajustado a rota para remover o traço e bater com o padrão do C#
+      const resposta = await fetch('https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Autenticacao/LoginMotorista', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -61,33 +62,39 @@ export default function App() {
         })
       });
 
-      const dados = await resposta.json();
+      // O DETETIVE: Lemos o texto puro antes de tentar transformar em JSON
+      const textoPuro = await resposta.text();
 
-      if (resposta.ok) {
-        // 2. Deu certo! Salvamos o Token e os dados na memória do celular
-        await AsyncStorage.setItem('tokenMotorista', dados.token);
-        await AsyncStorage.setItem('nomeMotorista', dados.motorista.nome);
-        await AsyncStorage.setItem('idMotorista', dados.motorista.id.toString());
-        
-        // --- 3. LÓGICA DO SÍMBOLO MIL-LIN ---
-        setCarregando(false); // Para a rodinha do botão
-        setProcessandoAcesso(true); // Mostra a tela de carregamento da MIL-LIN
-
-        // Espera 2.5 segundos para o motorista ver o símbolo e depois muda de tela
-        setTimeout(() => {
-            setProcessandoAcesso(false); // Esconde a tela MIL-LIN
-            router.replace('/radar' as any); // Pula pro radar
-        }, 1500);
-
-      } else {
-        Alert.alert("Erro ao entrar", dados.mensagem);
+      // Se deu erro 404, 500, etc, ele para aqui e te mostra o motivo exato na tela
+      if (!resposta.ok) {
+        Alert.alert(`Erro ${resposta.status} no Azure`, `Resposta do servidor: ${textoPuro}`);
+        setCarregando(false);
+        return;
       }
+
+      // Se passou e deu sucesso (Status 200), transformamos o texto em JSON em segurança
+      const dados = JSON.parse(textoPuro);
+
+      // 2. Deu certo! Salvamos o Token e os dados na memória do celular
+      await AsyncStorage.setItem('tokenMotorista', dados.token);
+      await AsyncStorage.setItem('nomeMotorista', dados.motorista.nome);
+      await AsyncStorage.setItem('idMotorista', dados.motorista.id.toString());
+        
+      // --- 3. LÓGICA DO SÍMBOLO MIL-LIN ---
+      setCarregando(false); // Para a rodinha do botão
+      setProcessandoAcesso(true); // Mostra a tela de carregamento da MIL-LIN
+
+      // Espera 1.5 segundos para o motorista ver o símbolo e depois muda de tela
+      setTimeout(() => {
+          setProcessandoAcesso(false); // Esconde a tela MIL-LIN
+          router.replace('/radar' as any); // Pula pro radar
+      }, 1500);
+
     } catch (erro) {
       console.error("Erro na comunicação:", erro);
-      Alert.alert("Sem Conexão", "Não foi possível conectar ao servidor.");
+      Alert.alert("Sem Conexão", "Não foi possível conectar ao servidor da Azure.");
     } finally {
       // Se deu erro, paramos o carregamento do botão aqui. 
-      // Se deu sucesso, o finally roda antes do setTimeout, por isso setamos 'false' ali em cima também por garantia visual.
       if (!processandoAcesso) setCarregando(false); 
     }
   };
@@ -100,7 +107,7 @@ export default function App() {
       <View style={milLinStyles.telaCarregamento}>
         <StatusBar backgroundColor="#fff" barStyle="dark-content" />
         
-        {/* Logo em branco "MIL-LIN" (como você pediu, em branco em cima do notebook) */}
+        {/* Logo em branco "MIL-LIN" */}
         <Text style={milLinStyles.tituloMilLinBranco}>M I L - L I N</Text>
         
         {/* Recriação do Símbolo em CSS */}

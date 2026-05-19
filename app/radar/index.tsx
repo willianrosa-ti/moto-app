@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, Animated, Easing, ScrollView, Modal, Dimensions, TouchableWithoutFeedback, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, Animated, Easing, ScrollView, Modal, Dimensions, TouchableWithoutFeedback, StatusBar, TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import * as signalR from '@microsoft/signalr';
@@ -8,6 +8,15 @@ import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons'; 
 
 const ficheiroBuzina = require('../../assets/sounds/buzina.mp3');
+
+const ERROS_COMUNS = [
+  'GPS não atualiza a localização',
+  'Não estou recebendo corridas',
+  'Problema ao finalizar uma corrida',
+  'O aplicativo está travando/fechando',
+  'Problema financeiro / Pagamento',
+  'Outra opção'
+];
 
 // --- SÍMBOLO MIL-LIN (Notebook CSS traduzido para React Native) ---
 const SimboloMilLin = () => (
@@ -39,6 +48,10 @@ export default function Radar() {
 
   // NOVO ESTADO: Controla a tela de carregamento/transição da MIL-LIN
   const [processandoAcesso, setProcessandoAcesso] = useState(false);
+
+  // --- NOVOS ESTADOS PARA O SUPORTE ---
+  const [erroSelecionado, setErroSelecionado] = useState<string>('');
+  const [textoOutroErro, setTextoOutroErro] = useState<string>('');
 
   const corridasIgnoradas = useRef<any[]>([]); 
   const corridaAceitaRef = useRef(false);
@@ -453,6 +466,36 @@ export default function Radar() {
     }
   };
 
+  // --- FUNÇÕES DO SUPORTE ---
+  const enviarProblemaParaAgencia = () => {
+    if (!erroSelecionado) {
+      Alert.alert("Atenção", "Por favor, selecione qual problema está enfrentando.");
+      return;
+    }
+    if (erroSelecionado === 'Outra opção' && textoOutroErro.trim() === '') {
+      Alert.alert("Atenção", "Por favor, descreva rapidamente o seu problema.");
+      return;
+    }
+
+    Alert.alert("Enviado!", "Sua notificação foi enviada para a agência. Em breve entraremos em contato se necessário.");
+    setModalCorridasAberto(false);
+    setErroSelecionado('');
+    setTextoOutroErro('');
+  };
+
+  const acionarContatoAgencia = (tipo: 'ligar' | 'whatsapp') => {
+    const numeroAgencia = "+5500000000000"; // INSIRA O NÚMERO DA SUA AGÊNCIA AQUI
+    if (tipo === 'ligar') {
+      Linking.openURL(`tel:${numeroAgencia}`);
+    } else {
+      Linking.openURL(`whatsapp://send?phone=${numeroAgencia}&text=Olá, sou motorista e preciso de ajuda no app.`);
+    }
+  };
+
+  const acionarSuporteMilLin = () => {
+    Linking.openURL(`whatsapp://send?phone=+5544997740967&text=Olá suporte MIL-LIN. Preciso de ajuda técnica com o app Moto-Taxi Thales.`);
+  };
+
   const sonarScale = animacaoRadar.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.5] });
   const sonarOpacity = animacaoRadar.interpolate({ inputRange: [0, 1], outputRange: [0.8, 0] });
 
@@ -532,7 +575,7 @@ export default function Radar() {
                 {/* Alterado para chamar a função com a transição MIL-LIN */}
                 <TouchableOpacity style={styles.itemMenu} onPress={() => executarAcaoMenu('financeiro')}>
                   <Ionicons name="cash-outline" size={20} color="#28a745" />
-                  <Text style={styles.textoItemMenu}>Financeiro</Text>
+                  <Text style={styles.textoItemMenu}>FINANCEIRO</Text>
                 </TouchableOpacity>
                 
                 {/* Alterado o ícone e chamando a transição MIL-LIN */}
@@ -553,16 +596,87 @@ export default function Radar() {
         </TouchableWithoutFeedback>
       </Modal>
 
+      {/* --- NOVO MODAL DE SUPORTE --- */}
       <Modal visible={modalCorridasAberto} animationType="slide">
-        <View style={styles.telaCorridasDisponiveis}>
+        <View style={styles.telaSuporte}>
           <View style={styles.cabecalhoModal}>
-            <Text style={styles.tituloModal}>SUPORTE TECNICO</Text>
-            <TouchableOpacity onPress={() => setModalCorridasAberto(false)}>
+            <Text style={styles.tituloModal}>SUPORTE TÉCNICO</Text>
+            <TouchableOpacity onPress={() => {
+              setModalCorridasAberto(false);
+              setErroSelecionado('');
+            }}>
               <Text style={styles.textoFecharBranco}>Voltar</Text>
             </TouchableOpacity>
           </View>
-          <Text style={styles.textoVazio}>Whatsapp: 44997740967.</Text>
-          <Text style={styles.textoVazio}>ENTRE EM CONTATO COM NOSSO NÚMERO WHATSAPP E FALE SEU PROBLEMA.</Text>
+
+          <ScrollView style={styles.conteudoSuporte} contentContainerStyle={{ paddingBottom: 40 }}>
+            <View style={styles.blocoSuporte}>
+              <Text style={styles.tituloSecaoSuporte}>Qual problema você está enfrentando?</Text>
+              
+              {ERROS_COMUNS.map((erro, index) => (
+                <TouchableOpacity 
+                  key={index} 
+                  style={[styles.opcaoErro, erroSelecionado === erro && styles.opcaoErroSelecionada]}
+                  onPress={() => setErroSelecionado(erro)}
+                >
+                  <Ionicons 
+                    name={erroSelecionado === erro ? "radio-button-on" : "radio-button-off"} 
+                    size={24} 
+                    color={erroSelecionado === erro ? "#28a745" : "#888"} 
+                  />
+                  <Text style={[styles.textoOpcaoErro, erroSelecionado === erro && styles.textoOpcaoErroAtivo]}>
+                    {erro}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+
+              {erroSelecionado === 'Outra opção' && (
+                <TextInput 
+                  style={styles.inputOutroErro}
+                  placeholder="Descreva brevemente o problema..."
+                  placeholderTextColor="#999"
+                  value={textoOutroErro}
+                  onChangeText={setTextoOutroErro}
+                  multiline={true}
+                  maxLength={150}
+                />
+              )}
+
+              <TouchableOpacity style={styles.btnEnviarAgencia} onPress={enviarProblemaParaAgencia}>
+                <Ionicons name="paper-plane-outline" size={20} color="#fff" />
+                <Text style={styles.btnTextoBrancoModal}>Notificar Agência do Problema</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.divisorSuporte} />
+
+            <View style={styles.blocoSuporte}>
+              <Text style={styles.tituloSecaoSuporte}>Falar diretamente com a Agência</Text>
+              <View style={styles.linhaBotoesContato}>
+                <TouchableOpacity style={styles.btnContatoAgenciaLigar} onPress={() => acionarContatoAgencia('ligar')}>
+                  <Ionicons name="call" size={20} color="#fff" />
+                  <Text style={styles.btnTextoBrancoModal}>Ligar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.btnContatoAgenciaWpp} onPress={() => acionarContatoAgencia('whatsapp')}>
+                  <Ionicons name="logo-whatsapp" size={20} color="#fff" />
+                  <Text style={styles.btnTextoBrancoModal}>Mensagem</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={styles.blocoSuporte}>
+              <Text style={styles.tituloSecaoSuporte}>Suporte de TI / Sistema</Text>
+              <Text style={styles.textoAjudaTi}>- Para problemas no sistema ou falhas técnicas estruturais.</Text>
+              <Text style={styles.textoAjudaTi}>- Deseja adiquirir algum de nossos produtos.</Text>
+              
+              <TouchableOpacity style={styles.btnContatoMilLin} onPress={acionarSuporteMilLin}>
+                <Ionicons name="logo-whatsapp" size={20} color="#fff" />
+                <Text style={styles.btnTextoBrancoModal}>Falar com a MIL-LIN</Text>
+              </TouchableOpacity>
+            </View>
+
+          </ScrollView>
         </View>
       </Modal>
 
@@ -955,6 +1069,25 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 15,
   },
+
+  // --- NOVOS ESTILOS DO SUPORTE ---
+  telaSuporte: { flex: 1, backgroundColor: '#f9f9f9' },
+  conteudoSuporte: { padding: 20 },
+  blocoSuporte: { backgroundColor: '#fff', borderRadius: 12, padding: 15, marginBottom: 20, elevation: 2, borderWidth: 1, borderColor: '#eee' },
+  tituloSecaoSuporte: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 15 },
+  opcaoErro: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f4f4f4' },
+  opcaoErroSelecionada: { backgroundColor: '#f0fff4' },
+  textoOpcaoErro: { fontSize: 15, color: '#555', marginLeft: 10, flex: 1 },
+  textoOpcaoErroAtivo: { color: '#28a745', fontWeight: 'bold' },
+  inputOutroErro: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, fontSize: 15, color: '#333', marginTop: 10, height: 80, textAlignVertical: 'top', backgroundColor: '#fdfdfd' },
+  btnEnviarAgencia: { flexDirection: 'row', backgroundColor: '#28a745', padding: 15, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginTop: 20, gap: 10 },
+  divisorSuporte: { height: 1, backgroundColor: '#ddd', marginVertical: 5 },
+  linhaBotoesContato: { flexDirection: 'row', gap: 10 },
+  btnContatoAgenciaLigar: { flex: 1, flexDirection: 'row', backgroundColor: '#007bff', padding: 12, borderRadius: 8, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  btnContatoAgenciaWpp: { flex: 1, flexDirection: 'row', backgroundColor: '#25D366', padding: 12, borderRadius: 8, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  textoAjudaTi: { fontSize: 13, color: '#666', marginBottom: 15 },
+  btnContatoMilLin: { flexDirection: 'row', backgroundColor: '#1f2937', padding: 15, borderRadius: 8, alignItems: 'center', justifyContent: 'center', gap: 10 },
+  btnTextoBrancoModal: { color: 'white', fontWeight: 'bold', fontSize: 16 },
 });
 
 // ==========================================

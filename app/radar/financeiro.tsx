@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -37,10 +37,10 @@ export default function FinanceiroMotorista() {
       // 2. Prepara a rota da API. 
       // ⚠️ ATENÇÃO: No Expo, 'localhost' não funciona. Troque "192.168.X.X" pelo IP IPv4 do seu computador na rede Wi-Fi!
       // O mês no JavaScript vai de 0 a 11, mas para o C# mandamos de 1 a 12.
-const mesParaEnviar = mesSelecionado + 1; 
+      const mesParaEnviar = mesSelecionado + 1; 
 
-// A rota limpa e direta para a sua API
-const url = `https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Motorista/financeiro?filtro=${filtro}&mes=${mesParaEnviar}`;
+      // A rota limpa e direta para a sua API
+      const url = `https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Motorista/financeiro?filtro=${filtro}&mes=${mesParaEnviar}`;
 
       // 3. Faz a chamada passando o Token no cabeçalho
       const resposta = await fetch(url, {
@@ -54,11 +54,24 @@ const url = `https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api
       if (resposta.ok) {
         const dadosReais = await resposta.json();
         
-        // 4. Injeta os dados do banco na tela!
+        // --- INÍCIO DA ALTERAÇÃO ---
+        // Pega os horários recebidos
+        const horariosRecebidos = dadosReais.melhoresHorarios || [];
+        
+        // 1. Ordena do maior valor para o menor valor
+        // 2. Pega apenas os 6 primeiros (slice)
+        // 3. Reordena pela hora para o gráfico ficar em ordem de tempo da esquerda pra direita
+        const top6Horarios = horariosRecebidos
+          .sort((a: any, b: any) => b.valor - a.valor)
+          .slice(0, 6)
+          .sort((a: any, b: any) => a.hora.localeCompare(b.hora));
+        // --- FIM DA ALTERAÇÃO ---
+
+        // 4. Injeta os dados do banco na tela limitados aos 6 melhores!
         setDadosFinanceiros({
           totalGanho: dadosReais.totalGanho || 0,
           totalCorridas: dadosReais.totalCorridas || 0,
-          melhoresHorarios: dadosReais.melhoresHorarios || []
+          melhoresHorarios: top6Horarios
         });
       } else {
         console.log("Erro na resposta da API. Status:", resposta.status);
@@ -96,7 +109,8 @@ const url = `https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api
           <Ionicons name="arrow-back" size={30} color="#fff"/>
         </TouchableOpacity>
         <Text style={styles.tituloCabecalho}>MEU FINANCEIRO</Text>
-        <View style={{ width: 24 }}/>{/* Espaçador para centralizar o título */}</View>
+        <View style={{ width: 24 }}/>{/* Espaçador para centralizar o título */}
+      </View>
 
       <ScrollView contentContainerStyle={styles.conteudo}>
         
