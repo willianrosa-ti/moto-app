@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, Animated, Easing, ScrollView, Modal, Dimensions, TouchableWithoutFeedback, StatusBar, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, Animated, Easing, ScrollView, Modal, TouchableWithoutFeedback, StatusBar } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import * as signalR from '@microsoft/signalr';
@@ -9,14 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 const ficheiroBuzina = require('../../assets/sounds/buzina.mp3');
 
-const ERROS_COMUNS = [
-  'GPS não atualiza a localização',
-  'Não estou recebendo corridas',
-  'Problema ao finalizar uma corrida',
-  'O aplicativo está travando/fechando',
-  'Problema financeiro / Pagamento',
-  'Outra opção'
-];
+const API_BASE = 'https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net';
 
 // --- SÍMBOLO MIL-LIN (Notebook CSS traduzido para React Native) ---
 const SimboloMilLin = () => (
@@ -37,7 +30,7 @@ export default function Radar() {
   const [tempoRestante, setTempoRestante] = useState(15);
   const [localizacaoMotorista, setLocalizacaoMotorista] = useState<Location.LocationObject | null>(null);
   const [menuAberto, setMenuAberto] = useState(false);
-  const [modalCorridasAberto, setModalCorridasAberto] = useState(false);
+  const [qtdNotificacoesSuporte, setQtdNotificacoesSuporte] = useState(0);
   
   const [valorDiario, setValorDiario] = useState<number>(0); 
   const [mostrarValor, setMostrarValor] = useState(false); 
@@ -49,9 +42,6 @@ export default function Radar() {
   // NOVO ESTADO: Controla a tela de carregamento/transição da MIL-LIN
   const [processandoAcesso, setProcessandoAcesso] = useState(false);
 
-  // --- NOVOS ESTADOS PARA O SUPORTE ---
-  const [erroSelecionado, setErroSelecionado] = useState<string>('');
-  const [textoOutroErro, setTextoOutroErro] = useState<string>('');
 
   const corridasIgnoradas = useRef<any[]>([]); 
   const corridaAceitaRef = useRef(false);
@@ -61,17 +51,19 @@ export default function Radar() {
   const animacaoRadar = useRef(new Animated.Value(0)).current;
   const navegar = useRouter();
 
-  // --- NOVA FUNÇÃO PARA GERENCIAR CLIQUES NO MENU COM TRANSIÇÃO ---
-  const executarAcaoMenu = (acao: 'financeiro' | 'suporte') => {
+  // --- FUNÇÃO PARA GERENCIAR CLIQUES NO MENU COM TRANSIÇÃO ---
+  const executarAcaoMenu = (acao: 'financeiro' | 'notificacoes' | 'suporte') => {
     setMenuAberto(false); // Fecha o menu lateral
-    setProcessandoAcesso(true); // Abre a tela de carregamento
+    setProcessandoAcesso(true); // Abre a tela de carregamento da MIL-LIN
 
     setTimeout(() => {
-      setProcessandoAcesso(false); // Esconde o carregamento após 3s
+      setProcessandoAcesso(false); // Esconde o carregamento
       if (acao === 'financeiro') {
-        navegar.push('/radar/financeiro');
+        navegar.push('/radar/financeiro' as any);
+      } else if (acao === 'notificacoes') {
+        navegar.push('/radar/notificacoes' as any);
       } else if (acao === 'suporte') {
-        setModalCorridasAberto(true);
+        navegar.push('/radar/suporte' as any);
       }
     }, 1000);
   };
@@ -115,7 +107,7 @@ export default function Radar() {
 
       const mesAtual = new Date().getMonth() + 1; 
       
-      const resposta = await fetch(`https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Motorista/financeiro?filtro=hoje&mes=${mesAtual}`, {
+      const resposta = await fetch(`${API_BASE}/api/Motorista/financeiro?filtro=hoje&mes=${mesAtual}`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -138,7 +130,7 @@ export default function Radar() {
       const token = await AsyncStorage.getItem('tokenMotorista');
       if (!token) return;
 
-      const resposta = await fetch('https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Corrida/ativa', {
+      const resposta = await fetch(`${API_BASE}/api/Corrida/ativa`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -159,14 +151,94 @@ export default function Radar() {
     }
   };
 
+  const buscarNotificacoesSuporteMotorista = async () => {
+    try {
+      const token = await AsyncStorage.getItem('tokenMotorista');
+      if (!token) return;
+
+      const resposta = await fetch(`${API_BASE}/api/Suporte/minhas-respostas`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (resposta.ok) {
+        const lista = await resposta.json();
+        const naoLidas = Array.isArray(lista)
+          ? lista.filter((item: any) => item.respostaAgencia && item.lidaPeloMotorista === false).length
+          : 0;
+
+        setQtdNotificacoesSuporte(naoLidas);
+      }
+    } catch (erro) {
+      console.log('Erro ao buscar notificações de suporte:', erro);
+    }
+  };
+
   useEffect(() => {
     buscarGanhosDoDia();
     verificarCorridaAtiva(); // <-- Adicionamos a checagem logo ao abrir o App
+    buscarNotificacoesSuporteMotorista();
+
+    const intervaloNotificacoes = setInterval(buscarNotificacoesSuporteMotorista, 30000);
+    return () => clearInterval(intervaloNotificacoes);
   }, []);
   // --- FIM DA INTEGRAÇÃO ---
 
   useEffect(() => {
     statusOnlineRef.current = statusOnline;
+  }, [statusOnline]);
+
+  // Mantém o motorista realmente "online" no painel da agência.
+  // Mesmo que o GPS demore a mandar uma posição nova, este pulso atualiza a última atividade no backend.
+  const enviarSinalDeVida = async () => {
+    try {
+      const token = await AsyncStorage.getItem('tokenMotorista');
+      if (!token) return;
+
+      try {
+        const localizacaoAtual = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+
+        setLocalizacaoMotorista(localizacaoAtual);
+
+        await fetch(`${API_BASE}/api/Motorista/atualizar-localizacao`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            latitude: localizacaoAtual.coords.latitude,
+            longitude: localizacaoAtual.coords.longitude
+          })
+        });
+      } catch (erroLocalizacao) {
+        // Fallback: mantém o sinal de vida pelo status online, mesmo se o GPS falhar por alguns segundos.
+        await fetch(`${API_BASE}/api/Motorista/alterar-status-online`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(true)
+        });
+      }
+    } catch (erro) {
+      console.log('Erro ao enviar sinal de vida:', erro);
+    }
+  };
+
+  useEffect(() => {
+    if (!statusOnline) return;
+
+    enviarSinalDeVida();
+    const intervaloSinalDeVida = setInterval(enviarSinalDeVida, 15000);
+
+    return () => clearInterval(intervaloSinalDeVida);
   }, [statusOnline]);
 
   useEffect(() => {
@@ -191,7 +263,7 @@ export default function Radar() {
           if (statusOnlineRef.current) {
             try {
               const token = await AsyncStorage.getItem('tokenMotorista');
-              await fetch('https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Motorista/atualizar-localizacao', {
+              await fetch(`${API_BASE}/api/Motorista/atualizar-localizacao`, {
                 method: 'POST',
                 headers: { 
                   'Content-Type': 'application/json',
@@ -258,11 +330,18 @@ export default function Radar() {
 
   useEffect(() => {
     const conexao = new signalR.HubConnectionBuilder()
-      .withUrl("https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/hub-corridas")
+      .withUrl(`${API_BASE}/hub-corridas`)
       .withAutomaticReconnect()
       .build();
 
-    conexao.start().catch(() => {});
+    conexao.start()
+      .then(async () => {
+        const idMotorista = await AsyncStorage.getItem('idMotorista');
+        if (idMotorista) {
+          await conexao.invoke('EntrarNoGrupoMotorista', idMotorista);
+        }
+      })
+      .catch(() => {});
 
     conexao.on("NovaCorridaDisponivel", () => {
       setSinalNovaCorrida(gatilho => gatilho + 1);
@@ -271,6 +350,31 @@ export default function Radar() {
     // NOVO: Gatilho para limpar a tela na mesma hora que alguém aceitar
     conexao.on("AtualizarCorridas", () => {
       setSinalNovaCorrida(gatilho => gatilho + 1);
+    });
+
+    conexao.on("RespostaSuporteRecebida", () => {
+      buscarNotificacoesSuporteMotorista();
+    });
+
+    conexao.on("ContaMotoristaAtualizada", (payload: any) => {
+      buscarNotificacoesSuporteMotorista();
+
+      if (payload?.suspenso === true) {
+        setStatusOnline(false);
+        statusOnlineRef.current = false;
+        setCorridaRecebida(null);
+        setCorridaAceita(false);
+        setCorridasDisponiveis([]);
+        Alert.alert(
+          "Conta suspensa",
+          payload?.respostaAgencia || "Sua conta foi suspensa! Caso você não concorde, favor entrar em contato."
+        );
+      } else if (payload?.tipoProblema === "Conta editada") {
+        Alert.alert(
+          "Conta editada",
+          payload?.respostaAgencia || "Sua conta foi editada! Caso não concorde, favor entrar em contato."
+        );
+      }
     });
 
     return () => { 
@@ -286,7 +390,7 @@ export default function Radar() {
 
       try {
         const token = await AsyncStorage.getItem('tokenMotorista'); 
-        const resposta = await fetch('https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Corrida/pendentes', {
+        const resposta = await fetch(`${API_BASE}/api/Corrida/pendentes`, {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${token}` 
@@ -366,7 +470,7 @@ export default function Radar() {
     const token = await AsyncStorage.getItem('tokenMotorista');
 
     try {
-      const resposta = await fetch('https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Motorista/alterar-status-online', {
+      const resposta = await fetch(`${API_BASE}/api/Motorista/alterar-status-online`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -377,13 +481,25 @@ export default function Radar() {
 
       if (resposta.ok) {
         setStatusOnline(novoStatus);
+        statusOnlineRef.current = novoStatus;
         setCorridaRecebida(null);
         setCorridasDisponiveis([]); // Limpa a lista ao deslogar
         setCorridaAceita(false);
         corridasIgnoradas.current = []; 
         setTempoRestante(15);
+
+        if (novoStatus) {
+          await enviarSinalDeVida();
+        }
       } else {
-        Alert.alert("Erro", "Erro ao sincronizar status.");
+        const textoErro = await resposta.text();
+        let mensagemErro = "Erro ao sincronizar status.";
+        try {
+          mensagemErro = JSON.parse(textoErro).mensagem || mensagemErro;
+        } catch {
+          if (textoErro) mensagemErro = textoErro;
+        }
+        Alert.alert("Erro", mensagemErro);
       }
     } catch (erro) {
       Alert.alert("Erro", "Sem conexão.");
@@ -407,7 +523,7 @@ export default function Radar() {
     try {
       const token = await AsyncStorage.getItem('tokenMotorista');
       
-      const resposta = await fetch(`https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Corrida/aceitar/${corridaAlvo.id}`, {
+      const resposta = await fetch(`${API_BASE}/api/Corrida/aceitar/${corridaAlvo.id}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -433,7 +549,7 @@ export default function Radar() {
     try {
       const token = await AsyncStorage.getItem('tokenMotorista');
       
-      const resposta = await fetch(`https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Corrida/finalizar/${corridaRecebida.id}`, {
+      const resposta = await fetch(`${API_BASE}/api/Corrida/finalizar/${corridaRecebida.id}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -466,35 +582,6 @@ export default function Radar() {
     }
   };
 
-  // --- FUNÇÕES DO SUPORTE ---
-  const enviarProblemaParaAgencia = () => {
-    if (!erroSelecionado) {
-      Alert.alert("Atenção", "Por favor, selecione qual problema está enfrentando.");
-      return;
-    }
-    if (erroSelecionado === 'Outra opção' && textoOutroErro.trim() === '') {
-      Alert.alert("Atenção", "Por favor, descreva rapidamente o seu problema.");
-      return;
-    }
-
-    Alert.alert("Enviado!", "Sua notificação foi enviada para a agência. Em breve entraremos em contato se necessário.");
-    setModalCorridasAberto(false);
-    setErroSelecionado('');
-    setTextoOutroErro('');
-  };
-
-  const acionarContatoAgencia = (tipo: 'ligar' | 'whatsapp') => {
-    const numeroAgencia = "+5500000000000"; // INSIRA O NÚMERO DA SUA AGÊNCIA AQUI
-    if (tipo === 'ligar') {
-      Linking.openURL(`tel:${numeroAgencia}`);
-    } else {
-      Linking.openURL(`whatsapp://send?phone=${numeroAgencia}&text=Olá, sou motorista e preciso de ajuda no app.`);
-    }
-  };
-
-  const acionarSuporteMilLin = () => {
-    Linking.openURL(`whatsapp://send?phone=+5544997740967&text=Olá suporte MIL-LIN. Preciso de ajuda técnica com o app Moto-Taxi Thales.`);
-  };
 
   const sonarScale = animacaoRadar.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.5] });
   const sonarOpacity = animacaoRadar.interpolate({ inputRange: [0, 1], outputRange: [0.8, 0] });
@@ -577,6 +664,18 @@ export default function Radar() {
                   <Ionicons name="cash-outline" size={20} color="#28a745" />
                   <Text style={styles.textoItemMenu}>FINANCEIRO</Text>
                 </TouchableOpacity>
+
+                <TouchableOpacity style={styles.itemMenu} onPress={() => executarAcaoMenu('notificacoes')}>
+                  <Ionicons name="notifications-outline" size={20} color="#28a745" />
+                  <View style={styles.notificacaoMenuLinha}>
+                    <Text style={styles.textoItemMenu}>NOTIFICAÇÕES DA AGÊNCIA</Text>
+                    {qtdNotificacoesSuporte > 0 && (
+                      <View style={styles.badgeNotificacaoMenu}>
+                        <Text style={styles.textoBadgeNotificacaoMenu}>{qtdNotificacoesSuporte}</Text>
+                      </View>
+                    )}
+                  </View>
+                </TouchableOpacity>
                 
                 {/* Alterado o ícone e chamando a transição MIL-LIN */}
                 <TouchableOpacity style={styles.itemMenu} onPress={() => executarAcaoMenu('suporte')}>
@@ -594,90 +693,6 @@ export default function Radar() {
             </TouchableWithoutFeedback>
           </View>
         </TouchableWithoutFeedback>
-      </Modal>
-
-      {/* --- NOVO MODAL DE SUPORTE --- */}
-      <Modal visible={modalCorridasAberto} animationType="slide">
-        <View style={styles.telaSuporte}>
-          <View style={styles.cabecalhoModal}>
-            <Text style={styles.tituloModal}>SUPORTE TÉCNICO</Text>
-            <TouchableOpacity onPress={() => {
-              setModalCorridasAberto(false);
-              setErroSelecionado('');
-            }}>
-              <Text style={styles.textoFecharBranco}>Voltar</Text>
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView style={styles.conteudoSuporte} contentContainerStyle={{ paddingBottom: 40 }}>
-            <View style={styles.blocoSuporte}>
-              <Text style={styles.tituloSecaoSuporte}>Qual problema você está enfrentando?</Text>
-              
-              {ERROS_COMUNS.map((erro, index) => (
-                <TouchableOpacity 
-                  key={index} 
-                  style={[styles.opcaoErro, erroSelecionado === erro && styles.opcaoErroSelecionada]}
-                  onPress={() => setErroSelecionado(erro)}
-                >
-                  <Ionicons 
-                    name={erroSelecionado === erro ? "radio-button-on" : "radio-button-off"} 
-                    size={24} 
-                    color={erroSelecionado === erro ? "#28a745" : "#888"} 
-                  />
-                  <Text style={[styles.textoOpcaoErro, erroSelecionado === erro && styles.textoOpcaoErroAtivo]}>
-                    {erro}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-
-              {erroSelecionado === 'Outra opção' && (
-                <TextInput 
-                  style={styles.inputOutroErro}
-                  placeholder="Descreva brevemente o problema..."
-                  placeholderTextColor="#999"
-                  value={textoOutroErro}
-                  onChangeText={setTextoOutroErro}
-                  multiline={true}
-                  maxLength={150}
-                />
-              )}
-
-              <TouchableOpacity style={styles.btnEnviarAgencia} onPress={enviarProblemaParaAgencia}>
-                <Ionicons name="paper-plane-outline" size={20} color="#fff" />
-                <Text style={styles.btnTextoBrancoModal}>Notificar Agência do Problema</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.divisorSuporte} />
-
-            <View style={styles.blocoSuporte}>
-              <Text style={styles.tituloSecaoSuporte}>Falar diretamente com a Agência</Text>
-              <View style={styles.linhaBotoesContato}>
-                <TouchableOpacity style={styles.btnContatoAgenciaLigar} onPress={() => acionarContatoAgencia('ligar')}>
-                  <Ionicons name="call" size={20} color="#fff" />
-                  <Text style={styles.btnTextoBrancoModal}>Ligar</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.btnContatoAgenciaWpp} onPress={() => acionarContatoAgencia('whatsapp')}>
-                  <Ionicons name="logo-whatsapp" size={20} color="#fff" />
-                  <Text style={styles.btnTextoBrancoModal}>Mensagem</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <View style={styles.blocoSuporte}>
-              <Text style={styles.tituloSecaoSuporte}>Suporte de TI / Sistema</Text>
-              <Text style={styles.textoAjudaTi}>- Para problemas no sistema ou falhas técnicas estruturais.</Text>
-              <Text style={styles.textoAjudaTi}>- Deseja adiquirir algum de nossos produtos.</Text>
-              
-              <TouchableOpacity style={styles.btnContatoMilLin} onPress={acionarSuporteMilLin}>
-                <Ionicons name="logo-whatsapp" size={20} color="#fff" />
-                <Text style={styles.btnTextoBrancoModal}>Falar com a MIL-LIN</Text>
-              </TouchableOpacity>
-            </View>
-
-          </ScrollView>
-        </View>
       </Modal>
 
       <ScrollView contentContainerStyle={styles.conteudoRadar}>
@@ -919,6 +934,27 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginLeft: 12
   },
+  notificacaoMenuLinha: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  badgeNotificacaoMenu: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#dc3545',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+    marginLeft: 8,
+  },
+  textoBadgeNotificacaoMenu: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
   itemMenuSair: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1069,25 +1105,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 15,
   },
-
-  // --- NOVOS ESTILOS DO SUPORTE ---
-  telaSuporte: { flex: 1, backgroundColor: '#f9f9f9' },
-  conteudoSuporte: { padding: 20 },
-  blocoSuporte: { backgroundColor: '#fff', borderRadius: 12, padding: 15, marginBottom: 20, elevation: 2, borderWidth: 1, borderColor: '#eee' },
-  tituloSecaoSuporte: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 15 },
-  opcaoErro: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f4f4f4' },
-  opcaoErroSelecionada: { backgroundColor: '#f0fff4' },
-  textoOpcaoErro: { fontSize: 15, color: '#555', marginLeft: 10, flex: 1 },
-  textoOpcaoErroAtivo: { color: '#28a745', fontWeight: 'bold' },
-  inputOutroErro: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, fontSize: 15, color: '#333', marginTop: 10, height: 80, textAlignVertical: 'top', backgroundColor: '#fdfdfd' },
-  btnEnviarAgencia: { flexDirection: 'row', backgroundColor: '#28a745', padding: 15, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginTop: 20, gap: 10 },
-  divisorSuporte: { height: 1, backgroundColor: '#ddd', marginVertical: 5 },
-  linhaBotoesContato: { flexDirection: 'row', gap: 10 },
-  btnContatoAgenciaLigar: { flex: 1, flexDirection: 'row', backgroundColor: '#007bff', padding: 12, borderRadius: 8, alignItems: 'center', justifyContent: 'center', gap: 8 },
-  btnContatoAgenciaWpp: { flex: 1, flexDirection: 'row', backgroundColor: '#25D366', padding: 12, borderRadius: 8, alignItems: 'center', justifyContent: 'center', gap: 8 },
-  textoAjudaTi: { fontSize: 13, color: '#666', marginBottom: 15 },
-  btnContatoMilLin: { flexDirection: 'row', backgroundColor: '#1f2937', padding: 15, borderRadius: 8, alignItems: 'center', justifyContent: 'center', gap: 10 },
-  btnTextoBrancoModal: { color: 'white', fontWeight: 'bold', fontSize: 16 },
 });
 
 // ==========================================
