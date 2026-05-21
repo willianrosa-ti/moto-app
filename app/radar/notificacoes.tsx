@@ -6,6 +6,21 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const API_BASE = 'https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net';
 
+const COR_PRIMARIA_PADRAO = '#28a745';
+const COR_SECUNDARIA_PADRAO = '#00c853';
+
+type TemaAgencia = {
+  nome: string;
+  corPrimaria: string;
+  corSecundaria: string;
+};
+
+const TEMA_AGENCIA_PADRAO: TemaAgencia = {
+  nome: 'Agência',
+  corPrimaria: COR_PRIMARIA_PADRAO,
+  corSecundaria: COR_SECUNDARIA_PADRAO,
+};
+
 type NotificacaoAgencia = {
   id: number;
   tipoProblema: string;
@@ -22,6 +37,26 @@ export default function NotificacoesAgencia() {
 
   const [carregando, setCarregando] = useState(true);
   const [notificacoes, setNotificacoes] = useState<NotificacaoAgencia[]>([]);
+  const [temaAgencia, setTemaAgencia] = useState<TemaAgencia>(TEMA_AGENCIA_PADRAO);
+
+
+  const carregarTemaAgenciaSalvo = async () => {
+    try {
+      const [nome, corPrimaria, corSecundaria] = await Promise.all([
+        AsyncStorage.getItem('nomeAgencia'),
+        AsyncStorage.getItem('corAgenciaPrimaria'),
+        AsyncStorage.getItem('corAgenciaSecundaria'),
+      ]);
+
+      setTemaAgencia({
+        nome: nome?.trim() || TEMA_AGENCIA_PADRAO.nome,
+        corPrimaria: corPrimaria?.trim() || TEMA_AGENCIA_PADRAO.corPrimaria,
+        corSecundaria: corSecundaria?.trim() || TEMA_AGENCIA_PADRAO.corSecundaria,
+      });
+    } catch (erro) {
+      console.log('Erro ao carregar identidade visual da agência:', erro);
+    }
+  };
 
   const formatarData = (valor?: string | null) => {
     if (!valor) return '';
@@ -92,14 +127,15 @@ export default function NotificacoesAgencia() {
   };
 
   useEffect(() => {
+    carregarTemaAgenciaSalvo();
     buscarNotificacoes();
   }, []);
 
   return (
     <View style={styles.container}>
-      <StatusBar backgroundColor="#28a745" barStyle="light-content" />
+      <StatusBar backgroundColor={temaAgencia.corPrimaria} barStyle="light-content" />
 
-      <View style={styles.cabecalho}>
+      <View style={[styles.cabecalho, { backgroundColor: temaAgencia.corPrimaria }]}>
         <TouchableOpacity style={styles.botaoVoltar} onPress={() => navegar.back()}>
           <Ionicons name="arrow-back" size={28} color="#fff" />
         </TouchableOpacity>
@@ -113,7 +149,7 @@ export default function NotificacoesAgencia() {
 
       {carregando ? (
         <View style={styles.areaCarregando}>
-          <ActivityIndicator size="large" color="#28a745" />
+          <ActivityIndicator size="large" color={temaAgencia.corPrimaria} />
           <Text style={styles.textoCarregando}>Buscando respostas da agência...</Text>
         </View>
       ) : (
@@ -126,10 +162,10 @@ export default function NotificacoesAgencia() {
             </View>
           ) : (
             notificacoes.map((item) => (
-              <View key={item.id} style={[styles.cardNotificacao, item.lidaPeloMotorista === false && styles.cardNaoLido]}>
+              <View key={item.id} style={[styles.cardNotificacao, item.lidaPeloMotorista === false && styles.cardNaoLido, item.lidaPeloMotorista === false && { borderColor: temaAgencia.corPrimaria }]}>
                 <View style={styles.linhaTopoCard}>
-                  <View style={styles.tagProblema}>
-                    <Text style={styles.textoTagProblema}>{item.tipoProblema}</Text>
+                  <View style={[styles.tagProblema, { backgroundColor: `${temaAgencia.corPrimaria}18` }]}>
+                    <Text style={[styles.textoTagProblema, { color: temaAgencia.corPrimaria }]}>{item.tipoProblema}</Text>
                   </View>
 
                   {item.lidaPeloMotorista === false && (
@@ -146,7 +182,7 @@ export default function NotificacoesAgencia() {
                   </View>
                 )}
 
-                <View style={styles.blocoResposta}>
+                <View style={[styles.blocoResposta, { borderLeftColor: temaAgencia.corPrimaria }]}>
                   <Text style={styles.label}>Resposta da agência:</Text>
                   <Text style={styles.textoResposta}>{item.respostaAgencia}</Text>
                 </View>

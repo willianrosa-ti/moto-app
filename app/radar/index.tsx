@@ -11,6 +11,26 @@ const ficheiroBuzina = require('../../assets/sounds/buzina.mp3');
 
 const API_BASE = 'https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net';
 
+const NOME_AGENCIA_PADRAO = 'RADAR DO MOTORISTA';
+const COR_PRIMARIA_PADRAO = '#28a745';
+const COR_SECUNDARIA_PADRAO = '#00c853';
+const TELEFONE_AGENCIA_PADRAO = '+5500000000000';
+
+type TemaAgencia = {
+  nome: string;
+  corPrimaria: string;
+  corSecundaria: string;
+  telefone: string;
+};
+
+const TEMA_AGENCIA_PADRAO: TemaAgencia = {
+  nome: NOME_AGENCIA_PADRAO,
+  corPrimaria: COR_PRIMARIA_PADRAO,
+  corSecundaria: COR_SECUNDARIA_PADRAO,
+  telefone: TELEFONE_AGENCIA_PADRAO,
+};
+
+
 // --- SÍMBOLO MIL-LIN (Notebook CSS traduzido para React Native) ---
 const SimboloMilLin = () => (
   <View style={milLinStyles.containerLogo}>
@@ -31,6 +51,7 @@ export default function Radar() {
   const [localizacaoMotorista, setLocalizacaoMotorista] = useState<Location.LocationObject | null>(null);
   const [menuAberto, setMenuAberto] = useState(false);
   const [qtdNotificacoesSuporte, setQtdNotificacoesSuporte] = useState(0);
+  const [temaAgencia, setTemaAgencia] = useState<TemaAgencia>(TEMA_AGENCIA_PADRAO);
   
   const [valorDiario, setValorDiario] = useState<number>(0); 
   const [mostrarValor, setMostrarValor] = useState(false); 
@@ -50,6 +71,27 @@ export default function Radar() {
 
   const animacaoRadar = useRef(new Animated.Value(0)).current;
   const navegar = useRouter();
+
+
+  const carregarTemaAgenciaSalvo = async () => {
+    try {
+      const [nome, corPrimaria, corSecundaria, telefone] = await Promise.all([
+        AsyncStorage.getItem('nomeAgencia'),
+        AsyncStorage.getItem('corAgenciaPrimaria'),
+        AsyncStorage.getItem('corAgenciaSecundaria'),
+        AsyncStorage.getItem('telefoneAgencia'),
+      ]);
+
+      setTemaAgencia({
+        nome: nome?.trim() || TEMA_AGENCIA_PADRAO.nome,
+        corPrimaria: corPrimaria?.trim() || TEMA_AGENCIA_PADRAO.corPrimaria,
+        corSecundaria: corSecundaria?.trim() || TEMA_AGENCIA_PADRAO.corSecundaria,
+        telefone: telefone?.trim() || TEMA_AGENCIA_PADRAO.telefone,
+      });
+    } catch (erro) {
+      console.log('Erro ao carregar identidade visual da agência:', erro);
+    }
+  };
 
   // --- FUNÇÃO PARA GERENCIAR CLIQUES NO MENU COM TRANSIÇÃO ---
   const executarAcaoMenu = (acao: 'financeiro' | 'notificacoes' | 'suporte') => {
@@ -84,6 +126,11 @@ export default function Radar() {
               await AsyncStorage.removeItem('tokenMotorista');
               await AsyncStorage.removeItem('nomeMotorista');
               await AsyncStorage.removeItem('idMotorista');
+              await AsyncStorage.removeItem('nomeAgencia');
+              await AsyncStorage.removeItem('corAgenciaPrimaria');
+              await AsyncStorage.removeItem('corAgenciaSecundaria');
+              await AsyncStorage.removeItem('logoAgencia');
+              await AsyncStorage.removeItem('telefoneAgencia');
               
               setStatusOnline(false); // Desliga o radar por segurança
               setMenuAberto(false);
@@ -178,6 +225,7 @@ export default function Radar() {
   };
 
   useEffect(() => {
+    carregarTemaAgenciaSalvo();
     buscarGanhosDoDia();
     verificarCorridaAtiva(); // <-- Adicionamos a checagem logo ao abrir o App
     buscarNotificacoesSuporteMotorista();
@@ -578,7 +626,7 @@ export default function Radar() {
     if (app === 'waze') {
       Linking.openURL(`https://waze.com/ul?q=${destinoEncoded}&navigate=yes`);
     } else {
-      Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=$${destinoEncoded}`);
+      Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${destinoEncoded}`);
     }
   };
 
@@ -608,8 +656,9 @@ export default function Radar() {
 
   return (
     <View style={styles.telaRadar}>
-      <View style={styles.cabecalhoRadar}>
-        <Text style={styles.tituloApp}>MOTO-TAXI THALES</Text>
+      <StatusBar backgroundColor={temaAgencia.corPrimaria} barStyle="light-content" />
+      <View style={[styles.cabecalhoRadar, { backgroundColor: temaAgencia.corPrimaria }]}>
+        <Text style={styles.tituloApp} numberOfLines={1}>{temaAgencia.nome.toUpperCase()}</Text>
         
         <View style={styles.botoesCabecalho}>
           <View style={styles.statusTopoContainer}>
@@ -634,7 +683,7 @@ export default function Radar() {
       <View style={styles.containerFlutuante}>
         <View style={styles.blocoGanhos}>
             <View style={styles.linhaValorVisibilidade}>
-            <Text style={styles.valorGanhos}>
+            <Text style={[styles.valorGanhos, { color: temaAgencia.corPrimaria }]}>
               {mostrarValor ? `R$ ${valorDiario.toFixed(2)}` : 'R$ ----'}
             </Text>
             <TouchableOpacity onPress={() => setMostrarValor(!mostrarValor)} style={styles.botaoOlho}>
@@ -661,14 +710,14 @@ export default function Radar() {
                 
                 {/* Alterado para chamar a função com a transição MIL-LIN */}
                 <TouchableOpacity style={styles.itemMenu} onPress={() => executarAcaoMenu('financeiro')}>
-                  <Ionicons name="cash-outline" size={20} color="#28a745" />
+                  <Ionicons name="cash-outline" size={20} color={temaAgencia.corPrimaria} />
                   <Text style={styles.textoItemMenu}>FINANCEIRO</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity style={styles.itemMenu} onPress={() => executarAcaoMenu('notificacoes')}>
-                  <Ionicons name="notifications-outline" size={20} color="#28a745" />
+                  <Ionicons name="notifications-outline" size={20} color={temaAgencia.corPrimaria} />
                   <View style={styles.notificacaoMenuLinha}>
-                    <Text style={styles.textoItemMenu}>NOTIFICAÇÕES DA AGÊNCIA</Text>
+                    <Text style={styles.textoItemMenu}>NOTIFICAÇÕES</Text>
                     {qtdNotificacoesSuporte > 0 && (
                       <View style={styles.badgeNotificacaoMenu}>
                         <Text style={styles.textoBadgeNotificacaoMenu}>{qtdNotificacoesSuporte}</Text>
@@ -679,7 +728,7 @@ export default function Radar() {
                 
                 {/* Alterado o ícone e chamando a transição MIL-LIN */}
                 <TouchableOpacity style={styles.itemMenu} onPress={() => executarAcaoMenu('suporte')}>
-                  <Ionicons name="headset-outline" size={20} color="#28a745" />
+                  <Ionicons name="headset-outline" size={20} color={temaAgencia.corPrimaria} />
                   <Text style={styles.textoItemMenu}>SUPORTE TECNICO</Text>
                 </TouchableOpacity>
 
@@ -701,14 +750,14 @@ export default function Radar() {
         {statusOnline && !corridaAceita && (
           <View style={styles.botoesModoContainer}>
             <TouchableOpacity
-              style={[styles.botaoModo, modoVisualizacao === 'lista' && styles.botaoModoAtivo]}
+              style={[styles.botaoModo, modoVisualizacao === 'lista' && styles.botaoModoAtivo, modoVisualizacao === 'lista' && { backgroundColor: temaAgencia.corPrimaria }]}
               onPress={() => setModoVisualizacao('lista')}
             >
               <Text style={[styles.textoBotaoModo, modoVisualizacao === 'lista' && styles.textoBotaoModoAtivo]}>Lista de Corridas</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.botaoModo, modoVisualizacao === 'radar' && styles.botaoModoAtivo]}
+              style={[styles.botaoModo, modoVisualizacao === 'radar' && styles.botaoModoAtivo, modoVisualizacao === 'radar' && { backgroundColor: temaAgencia.corPrimaria }]}
               onPress={() => setModoVisualizacao('radar')}
             >
               <Text style={[styles.textoBotaoModo, modoVisualizacao === 'radar' && styles.textoBotaoModoAtivo]}>Radar</Text>
@@ -742,7 +791,7 @@ export default function Radar() {
                     <Text style={styles.enderecoTextoLista} numberOfLines={2}>📍 Levar para: {corrida.destino}</Text>
                   </View>
                   <TouchableOpacity
-                    style={styles.botaoAceitarLista}
+                    style={[styles.botaoAceitarLista, { backgroundColor: temaAgencia.corSecundaria }]}
                     onPress={() => aceitarCorridaReal(corrida)}
                   >
                     <Text style={styles.textoBotaoAceitarLista}>ACEITAR CORRIDA</Text>
@@ -763,7 +812,7 @@ export default function Radar() {
                 </View>
 
                 <View style={styles.cronometroBarra}>
-                  <View style={[styles.progresso, { width: `${(tempoRestante / 15) * 100}%` }]} />
+                  <View style={[styles.progresso, { width: `${(tempoRestante / 15) * 100}%`, backgroundColor: temaAgencia.corPrimaria }]} />
                 </View>
                 <Text style={styles.textoTempo}>{tempoRestante}s para aceitar</Text>
 
@@ -784,7 +833,7 @@ export default function Radar() {
                   <TouchableOpacity style={styles.btnRecusar} onPress={recusarCorrida}>
                     <Text style={styles.btnTextoVermelho}>RECUSAR</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.btnAceitar} onPress={() => aceitarCorridaReal()}>
+                  <TouchableOpacity style={[styles.btnAceitar, { backgroundColor: temaAgencia.corSecundaria }]} onPress={() => aceitarCorridaReal()}>
                     <Text style={styles.btnTextoBranco}>ACEITAR</Text>
                   </TouchableOpacity>
                 </View>
@@ -797,7 +846,7 @@ export default function Radar() {
                   styles.sonarWave, 
                   { transform: [{ scale: sonarScale }], opacity: sonarOpacity }
                 ]} />
-                <Text style={styles.textoBuscando}>Procurando passageiros...</Text>
+                <Text style={[styles.textoBuscando, { color: temaAgencia.corSecundaria }]}>Procurando passageiros...</Text>
               </View>
             )}
           </>
@@ -807,8 +856,8 @@ export default function Radar() {
         {statusOnline && corridaRecebida && corridaAceita && (
           <View style={styles.cartaoEmCorrida}>
             <View style={styles.cabecalhoEmCorrida}>
-              <Text style={styles.tituloEmCorrida}>🚀 EM CORRIDA</Text>
-              <Text style={styles.valorDestaque}>R$ {corridaRecebida.valor.toFixed(2)}</Text>
+              <Text style={[styles.tituloEmCorrida, { color: temaAgencia.corPrimaria }]}>🚀 EM CORRIDA</Text>
+              <Text style={[styles.valorDestaque, { color: temaAgencia.corPrimaria }]}>R$ {corridaRecebida.valor.toFixed(2)}</Text>
             </View>
 
             <View style={styles.infoPassageiroMini}>
@@ -843,7 +892,7 @@ export default function Radar() {
               </View>
             </View>
 
-            <TouchableOpacity style={styles.btnFinalizarTotal} onPress={finalizarCorridaReal}>
+            <TouchableOpacity style={[styles.btnFinalizarTotal, { backgroundColor: temaAgencia.corPrimaria }]} onPress={finalizarCorridaReal}>
               <Text style={styles.btnTextoBranco}>FINALIZAR CORRIDA</Text>
             </TouchableOpacity>
           </View>
@@ -857,7 +906,7 @@ export default function Radar() {
 const styles = StyleSheet.create({
   telaRadar: { flex: 1, backgroundColor: '#ffffff' },
   cabecalhoRadar: { padding: 15, paddingBottom: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#28a745', elevation: 0 },
-  tituloApp: { fontWeight: '900', fontStyle: 'italic', fontSize: 20, color: '#fff' },
+  tituloApp: { flex: 1, fontWeight: '900', fontStyle: 'italic', fontSize: 20, color: '#fff', marginRight: 10 },
   botoesCabecalho: { flexDirection: 'row', alignItems: 'center', gap: 15 },
   statusTopoContainer: { alignItems: 'center', justifyContent: 'center' },
   alavancaInterruptor: { width: 60, height: 30, borderRadius: 30, backgroundColor: '#ffffff', justifyContent: 'center', padding: 4, elevation: 2 },

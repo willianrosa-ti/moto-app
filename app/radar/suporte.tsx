@@ -1,10 +1,28 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, ScrollView, TextInput, StatusBar, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const API_BASE = 'https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net';
+
+const COR_PRIMARIA_PADRAO = '#28a745';
+const COR_SECUNDARIA_PADRAO = '#00c853';
+const TELEFONE_AGENCIA_PADRAO = '+5500000000000';
+
+type TemaAgencia = {
+  nome: string;
+  corPrimaria: string;
+  corSecundaria: string;
+  telefone: string;
+};
+
+const TEMA_AGENCIA_PADRAO: TemaAgencia = {
+  nome: 'Agência',
+  corPrimaria: COR_PRIMARIA_PADRAO,
+  corSecundaria: COR_SECUNDARIA_PADRAO,
+  telefone: TELEFONE_AGENCIA_PADRAO,
+};
 
 const ERROS_COMUNS = [
   'GPS não atualiza a localização',
@@ -21,6 +39,32 @@ export default function SuporteTecnico() {
   const [erroSelecionado, setErroSelecionado] = useState<string>('');
   const [textoOutroErro, setTextoOutroErro] = useState<string>('');
   const [enviando, setEnviando] = useState(false);
+  const [temaAgencia, setTemaAgencia] = useState<TemaAgencia>(TEMA_AGENCIA_PADRAO);
+
+
+  const carregarTemaAgenciaSalvo = async () => {
+    try {
+      const [nome, corPrimaria, corSecundaria, telefone] = await Promise.all([
+        AsyncStorage.getItem('nomeAgencia'),
+        AsyncStorage.getItem('corAgenciaPrimaria'),
+        AsyncStorage.getItem('corAgenciaSecundaria'),
+        AsyncStorage.getItem('telefoneAgencia'),
+      ]);
+
+      setTemaAgencia({
+        nome: nome?.trim() || TEMA_AGENCIA_PADRAO.nome,
+        corPrimaria: corPrimaria?.trim() || TEMA_AGENCIA_PADRAO.corPrimaria,
+        corSecundaria: corSecundaria?.trim() || TEMA_AGENCIA_PADRAO.corSecundaria,
+        telefone: telefone?.trim() || TEMA_AGENCIA_PADRAO.telefone,
+      });
+    } catch (erro) {
+      console.log('Erro ao carregar identidade visual da agência:', erro);
+    }
+  };
+
+  useEffect(() => {
+    carregarTemaAgenciaSalvo();
+  }, []);
 
   const enviarProblemaParaAgencia = async () => {
     if (!erroSelecionado) {
@@ -87,7 +131,7 @@ export default function SuporteTecnico() {
   };
 
   const acionarContatoAgencia = (tipo: 'ligar' | 'whatsapp') => {
-    const numeroAgencia = '+5500000000000'; // INSIRA O NÚMERO DA SUA AGÊNCIA AQUI
+    const numeroAgencia = temaAgencia.telefone || TELEFONE_AGENCIA_PADRAO;
 
     if (tipo === 'ligar') {
       Linking.openURL(`tel:${numeroAgencia}`);
@@ -100,15 +144,15 @@ export default function SuporteTecnico() {
 
   const acionarSuporteMilLin = () => {
     Linking.openURL(
-      'whatsapp://send?phone=+5544997740967&text=Olá suporte MIL-LIN. Preciso de ajuda técnica com o app Moto-Taxi Thales.'
+      'whatsapp://send?phone=+5544997740967&text=Olá suporte MIL-LIN. Preciso de ajuda técnica com o app do motorista.'
     );
   };
 
   return (
     <View style={styles.telaSuporte}>
-      <StatusBar backgroundColor="#28a745" barStyle="light-content" />
+      <StatusBar backgroundColor={temaAgencia.corPrimaria} barStyle="light-content" />
 
-      <View style={styles.cabecalho}>
+      <View style={[styles.cabecalho, { backgroundColor: temaAgencia.corPrimaria }]}>
         <TouchableOpacity style={styles.botaoVoltar} onPress={() => navegar.back()}>
           <Ionicons name="arrow-back" size={28} color="#fff" />
         </TouchableOpacity>
@@ -125,17 +169,17 @@ export default function SuporteTecnico() {
           {ERROS_COMUNS.map((erro, index) => (
             <TouchableOpacity
               key={index}
-              style={[styles.opcaoErro, erroSelecionado === erro && styles.opcaoErroSelecionada]}
+              style={[styles.opcaoErro, erroSelecionado === erro && styles.opcaoErroSelecionada, erroSelecionado === erro && { backgroundColor: `${temaAgencia.corPrimaria}12` }]}
               onPress={() => setErroSelecionado(erro)}
               activeOpacity={0.8}
             >
               <Ionicons
                 name={erroSelecionado === erro ? 'radio-button-on' : 'radio-button-off'}
                 size={24}
-                color={erroSelecionado === erro ? '#28a745' : '#888'}
+                color={erroSelecionado === erro ? temaAgencia.corPrimaria : '#888'}
               />
 
-              <Text style={[styles.textoOpcaoErro, erroSelecionado === erro && styles.textoOpcaoErroAtivo]}>
+              <Text style={[styles.textoOpcaoErro, erroSelecionado === erro && styles.textoOpcaoErroAtivo, erroSelecionado === erro && { color: temaAgencia.corPrimaria }]}>
                 {erro}
               </Text>
             </TouchableOpacity>
@@ -154,7 +198,7 @@ export default function SuporteTecnico() {
           )}
 
           <TouchableOpacity
-            style={[styles.btnEnviarAgencia, enviando && styles.btnDesabilitado]}
+            style={[styles.btnEnviarAgencia, { backgroundColor: temaAgencia.corPrimaria }, enviando && styles.btnDesabilitado]}
             onPress={enviarProblemaParaAgencia}
             activeOpacity={0.85}
             disabled={enviando}

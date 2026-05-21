@@ -6,11 +6,30 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const mesesDoAno = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
+
+const API_BASE = 'https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net';
+const COR_PRIMARIA_PADRAO = '#28a745';
+const COR_SECUNDARIA_PADRAO = '#00c853';
+
+type TemaAgencia = {
+  nome: string;
+  corPrimaria: string;
+  corSecundaria: string;
+};
+
+const TEMA_AGENCIA_PADRAO: TemaAgencia = {
+  nome: 'Agência',
+  corPrimaria: COR_PRIMARIA_PADRAO,
+  corSecundaria: COR_SECUNDARIA_PADRAO,
+};
+
+
 export default function FinanceiroMotorista() {
   const navegar = useRouter();
   const [filtro, setFiltro] = useState<'hoje' | 'semana' | 'mes'>('hoje');
   const [mesSelecionado, setMesSelecionado] = useState(new Date().getMonth()); // 0 a 11
   const [carregando, setCarregando] = useState(true);
+  const [temaAgencia, setTemaAgencia] = useState<TemaAgencia>(TEMA_AGENCIA_PADRAO);
 
   // Estado para armazenar os dados que virão da API
   const [dadosFinanceiros, setDadosFinanceiros] = useState({
@@ -18,6 +37,25 @@ export default function FinanceiroMotorista() {
     totalCorridas: 0,
     melhoresHorarios: [] as { hora: string; valor: number; corridas: number }[]
   });
+
+
+  const carregarTemaAgenciaSalvo = async () => {
+    try {
+      const [nome, corPrimaria, corSecundaria] = await Promise.all([
+        AsyncStorage.getItem('nomeAgencia'),
+        AsyncStorage.getItem('corAgenciaPrimaria'),
+        AsyncStorage.getItem('corAgenciaSecundaria'),
+      ]);
+
+      setTemaAgencia({
+        nome: nome?.trim() || TEMA_AGENCIA_PADRAO.nome,
+        corPrimaria: corPrimaria?.trim() || TEMA_AGENCIA_PADRAO.corPrimaria,
+        corSecundaria: corSecundaria?.trim() || TEMA_AGENCIA_PADRAO.corSecundaria,
+      });
+    } catch (erro) {
+      console.log('Erro ao carregar identidade visual da agência:', erro);
+    }
+  };
 
   // Função REAL para buscar os dados no C#
   const buscarDadosFinanceiros = async () => {
@@ -40,7 +78,7 @@ export default function FinanceiroMotorista() {
       const mesParaEnviar = mesSelecionado + 1; 
 
       // A rota limpa e direta para a sua API
-      const url = `https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net/api/Motorista/financeiro?filtro=${filtro}&mes=${mesParaEnviar}`;
+      const url = `${API_BASE}/api/Motorista/financeiro?filtro=${filtro}&mes=${mesParaEnviar}`;
 
       // 3. Faz a chamada passando o Token no cabeçalho
       const resposta = await fetch(url, {
@@ -85,6 +123,10 @@ export default function FinanceiroMotorista() {
   };
 
   useEffect(() => {
+    carregarTemaAgenciaSalvo();
+  }, []);
+
+  useEffect(() => {
     // Sempre que o filtro ('hoje', 'semana', 'mes') ou o mês mudar, busca no banco de novo
     buscarDadosFinanceiros();
   }, [filtro, mesSelecionado]);
@@ -104,7 +146,7 @@ export default function FinanceiroMotorista() {
   return (
     <View style={styles.container}>
       {/* CABEÇALHO */}
-      <View style={styles.cabecalho}>
+      <View style={[styles.cabecalho, { backgroundColor: temaAgencia.corPrimaria }]}>
         <TouchableOpacity style={styles.botaoVoltar} onPress={() => navegar.back()}>
           <Ionicons name="arrow-back" size={30} color="#fff"/>
         </TouchableOpacity>
@@ -117,13 +159,13 @@ export default function FinanceiroMotorista() {
         {/* ABAS DE FILTRO */}
         <View style={styles.containerAbas}>
           <TouchableOpacity style={[styles.aba, filtro === 'hoje' && styles.abaAtiva]} onPress={() => setFiltro('hoje')}>
-            <Text style={[styles.textoAba, filtro === 'hoje' && styles.textoAbaAtivo]}>Hoje</Text>
+            <Text style={[styles.textoAba, filtro === 'hoje' && styles.textoAbaAtivo, filtro === 'hoje' && { color: temaAgencia.corPrimaria }]}>Hoje</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.aba, filtro === 'semana' && styles.abaAtiva]} onPress={() => setFiltro('semana')}>
-            <Text style={[styles.textoAba, filtro === 'semana' && styles.textoAbaAtivo]}>Semana</Text>
+            <Text style={[styles.textoAba, filtro === 'semana' && styles.textoAbaAtivo, filtro === 'semana' && { color: temaAgencia.corPrimaria }]}>Semana</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.aba, filtro === 'mes' && styles.abaAtiva]} onPress={() => setFiltro('mes')}>
-            <Text style={[styles.textoAba, filtro === 'mes' && styles.textoAbaAtivo]}>Mês</Text>
+            <Text style={[styles.textoAba, filtro === 'mes' && styles.textoAbaAtivo, filtro === 'mes' && { color: temaAgencia.corPrimaria }]}>Mês</Text>
           </TouchableOpacity>
         </View>
 
@@ -131,24 +173,24 @@ export default function FinanceiroMotorista() {
         {filtro === 'mes' && (
           <View style={styles.seletorMes}>
             <TouchableOpacity onPress={() => mudarMes(-1)} style={styles.setaMes}>
-              <Ionicons name="chevron-back" size={24} color="#28a745" />
+              <Ionicons name="chevron-back" size={24} color={temaAgencia.corPrimaria} />
             </TouchableOpacity>
             <Text style={styles.textoMesAtual}>{mesesDoAno[mesSelecionado]}</Text>
             <TouchableOpacity onPress={() => mudarMes(1)} style={styles.setaMes}>
-              <Ionicons name="chevron-forward" size={24} color="#28a745" />
+              <Ionicons name="chevron-forward" size={24} color={temaAgencia.corPrimaria} />
             </TouchableOpacity>
           </View>
         )}
 
         {carregando ? (
-          <ActivityIndicator size="large" color="#28a745" style={{ marginTop: 50 }} />
+          <ActivityIndicator size="large" color={temaAgencia.corPrimaria} style={{ marginTop: 50 }} />
         ) : (
           <>
             {/* CARDS DE RESUMO */}
             <View style={styles.containerResumo}>
-              <View style={styles.cardResumoPrincipal}>
+              <View style={[styles.cardResumoPrincipal, { borderLeftColor: temaAgencia.corPrimaria }]}>
                 <Text style={styles.tituloCard}>Total de Ganhos</Text>
-                <Text style={styles.valorCardGanhos}>R$ {dadosFinanceiros.totalGanho.toFixed(2)}</Text>
+                <Text style={[styles.valorCardGanhos, { color: temaAgencia.corPrimaria }]}>R$ {dadosFinanceiros.totalGanho.toFixed(2)}</Text>
               </View>
 
               <View style={styles.cardResumoSecundario}>
@@ -163,7 +205,7 @@ export default function FinanceiroMotorista() {
             {/* GRÁFICO DE MELHORES HORÁRIOS */}
             <View style={styles.cardGrafico}>
               <View style={styles.cabecalhoGrafico}>
-                <Ionicons name="time" size={22} color="#28a745" />
+                <Ionicons name="time" size={22} color={temaAgencia.corPrimaria} />
                 <Text style={styles.tituloGrafico}>Picos de Faturamento</Text>
               </View>
               
@@ -177,7 +219,7 @@ export default function FinanceiroMotorista() {
                       <View key={index} style={styles.colunaGrafico}>
                         <Text style={styles.valorBarra}>R$ {item.valor.toFixed(0)}</Text>
                         <View style={styles.barraFundo}>
-                          <View style={[styles.barraPreenchida, { height: `${alturaBarra}%` }]} />
+                          <View style={[styles.barraPreenchida, { height: `${alturaBarra}%`, backgroundColor: temaAgencia.corPrimaria }]} />
                         </View>
                         <Text style={styles.textoHoraBarra}>{item.hora}</Text>
                         <Text style={styles.textoCorridasBarra}>{item.corridas} c.</Text>
