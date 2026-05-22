@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, Animated, Easing, ScrollView, Modal, TouchableWithoutFeedback, StatusBar } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useKeepAwake } from 'expo-keep-awake';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import * as signalR from '@microsoft/signalr';
@@ -48,6 +50,8 @@ const SimboloMilLin = () => (
 );
 
 export default function Radar() {
+  useKeepAwake();
+
   const [statusOnline, setStatusOnline] = useState(false);
   const [corridaRecebida, setCorridaRecebida] = useState<any>(null);
   const [corridaAceita, setCorridaAceita] = useState(false);
@@ -673,7 +677,7 @@ export default function Radar() {
   // ==========================================
   if (processandoAcesso) {
     return (
-      <View style={milLinStyles.telaCarregamento}>
+      <SafeAreaView style={milLinStyles.telaCarregamento} edges={['top', 'left', 'right', 'bottom']}>
         <StatusBar backgroundColor="#1f2937" barStyle="light-content" />
         
         {/* Logo em branco "MIL-LIN" (como você pediu, em branco em cima do notebook) */}
@@ -684,13 +688,14 @@ export default function Radar() {
         
         {/* Texto "CARREGANDO..." em baixo */}
         <Text style={milLinStyles.textoCarregando}>C  A  R  R  E  G  A  N  D  O...</Text>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.telaRadar}>
-      <StatusBar backgroundColor={temaAgencia.corPrimaria} barStyle="light-content" />
+    <SafeAreaView style={[styles.areaSeguraApp, { backgroundColor: temaAgencia.corPrimaria }]} edges={['top', 'left', 'right']}>
+      <View style={styles.telaRadar}>
+        <StatusBar backgroundColor={temaAgencia.corPrimaria} barStyle="light-content" />
       <View style={[styles.cabecalhoRadar, { backgroundColor: temaAgencia.corPrimaria }]}>
         <Text style={styles.tituloApp} numberOfLines={1}>{temaAgencia.nome.toUpperCase()}</Text>
         
@@ -883,7 +888,7 @@ export default function Radar() {
                   styles.sonarWave, 
                   { transform: [{ scale: sonarScale }], opacity: sonarOpacity }
                 ]} />
-                <Text style={[styles.textoBuscando, { color: temaAgencia.corSecundaria }]}>Procurando passageiros...</Text>
+                <Text style={[styles.textoBuscando, { color: "#46f371" }]}>Procurando passageiros...</Text>
               </View>
             )}
           </>
@@ -935,12 +940,14 @@ export default function Radar() {
           </View>
         )}
 
-      </ScrollView>
-    </View>
+        </ScrollView>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  areaSeguraApp: { flex: 1 },
   telaRadar: { flex: 1, backgroundColor: '#ffffff' },
   cabecalhoRadar: { padding: 15, paddingBottom: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#28a745', elevation: 0 },
   tituloApp: { flex: 1, fontWeight: '900', fontStyle: 'italic', fontSize: 20, color: '#fff', marginRight: 10 },
