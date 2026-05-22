@@ -30,6 +30,11 @@ const TEMA_AGENCIA_PADRAO: TemaAgencia = {
   telefone: TELEFONE_AGENCIA_PADRAO,
 };
 
+const formatarQuilometragem = (valor: any) => {
+  const numero = Number(valor || 0);
+  return `${numero.toFixed(1).replace('.', ',')} km de distância`;
+};
+
 
 // --- SÍMBOLO MIL-LIN (Notebook CSS traduzido para React Native) ---
 const SimboloMilLin = () => (
@@ -817,7 +822,10 @@ export default function Radar() {
                   </View>
                   <View style={styles.enderecosLista}>
                     <Text style={styles.enderecoTextoLista} numberOfLines={2}>🚗 Buscar em: {corrida.busca}</Text>
+                    <Text style={styles.quilometragemTextoLista}>{formatarQuilometragem(corrida.distanciaBusca)}</Text>
+
                     <Text style={styles.enderecoTextoLista} numberOfLines={2}>📍 Levar para: {corrida.destino}</Text>
+                    <Text style={styles.quilometragemTextoLista}>{formatarQuilometragem(corrida.distanciaDestino)}</Text>
                   </View>
                   <TouchableOpacity
                     style={[styles.botaoAceitarLista, { backgroundColor: temaAgencia.corPrimaria }]}
@@ -875,7 +883,7 @@ export default function Radar() {
                   styles.sonarWave, 
                   { transform: [{ scale: sonarScale }], opacity: sonarOpacity }
                 ]} />
-                <Text style={[styles.textoBuscando, { color: "#38d467" }]}>Procurando passageiros...</Text>
+                <Text style={[styles.textoBuscando, { color: temaAgencia.corSecundaria }]}>Procurando passageiros...</Text>
               </View>
             )}
           </>
@@ -1171,6 +1179,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#555',
     fontWeight: '600',
+  },
+  quilometragemTextoLista: {
+    fontSize: 13,
+    color: '#007bff',
+    fontWeight: '700',
+    marginBottom: 6,
+    marginLeft: 18,
   },
   botaoAceitarLista: {
     backgroundColor: '#00c853',

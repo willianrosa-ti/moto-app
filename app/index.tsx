@@ -265,7 +265,7 @@ export default function LoginMotorista() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1f2937',
+    backgroundColor: '#fcfcfc',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 16,
