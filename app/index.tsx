@@ -14,6 +14,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const API_BASE = 'https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net';
 
@@ -157,7 +158,10 @@ export default function LoginMotorista() {
   // ==========================================
   if (processandoAcesso) {
     return (
-      <View style={milLinStyles.telaCarregamento}>
+      <SafeAreaView
+        style={milLinStyles.telaCarregamento}
+        edges={['top', 'left', 'right', 'bottom']}
+      >
         <StatusBar backgroundColor="#1f2937" barStyle="light-content" />
 
         <Text style={milLinStyles.tituloMilLinBranco}>M I L - L I N</Text>
@@ -165,7 +169,7 @@ export default function LoginMotorista() {
         <SimboloMilLin />
 
         <Text style={milLinStyles.textoCarregando}>C A R R E G A N D O...</Text>
-      </View>
+      </SafeAreaView>
     );
   }
 
@@ -173,7 +177,8 @@ export default function LoginMotorista() {
   // LOGIN NEUTRO DA MIL-LIN
   // ==========================================
   return (
-    <KeyboardAvoidingView
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
+      <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
@@ -255,7 +260,8 @@ export default function LoginMotorista() {
 
         <Text style={styles.rodape}>Sistema conectado à sua agência</Text>
       </View>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
@@ -263,6 +269,11 @@ export default function LoginMotorista() {
 // ESTILOS DA TELA DE LOGIN
 // ==========================================
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#fcfcfc',
+  },
+
   container: {
     flex: 1,
     backgroundColor: '#fcfcfc',

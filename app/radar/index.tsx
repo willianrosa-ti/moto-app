@@ -122,6 +122,14 @@ export default function Radar() {
 
   // --- NOVA FUNÇÃO DE SAIR (LOGOUT) ---
   const fazerLogout = async () => {
+    if (corridaAceita) {
+      Alert.alert(
+        "Corrida em andamento",
+        "Finalize a corrida antes de sair do app."
+      );
+      return;
+    }
+
     Alert.alert(
       "Sair do App",
       "Tem certeza que deseja desconectar sua conta?",
@@ -555,6 +563,14 @@ export default function Radar() {
     const novoStatus = !statusOnline;
     const token = await AsyncStorage.getItem('tokenMotorista');
 
+    if (!novoStatus && corridaAceita) {
+      Alert.alert(
+        "Corrida em andamento",
+        "Finalize a corrida antes de desligar o radar."
+      );
+      return;
+    }
+
     try {
       const resposta = await fetch(`${API_BASE}/api/Motorista/alterar-status-online`, {
         method: 'POST',
@@ -715,6 +731,7 @@ export default function Radar() {
 
           <TouchableOpacity style={styles.botaoMenu} onPress={() => setMenuAberto(true)}>
             <Text style={styles.iconeMenu}>≡</Text>
+            {qtdNotificacoesSuporte > 0 && <View style={styles.badgeMenuRecursos} />}
           </TouchableOpacity>
         </View>
       </View>
@@ -958,8 +975,19 @@ const styles = StyleSheet.create({
   indicadorStatus: { width: 22, height: 22, borderRadius: 11, position: 'absolute' },
   bolinhaVerde: { backgroundColor: '#00e676', right: 4, elevation: 5 },
   bolinhaVermelha: { backgroundColor: '#ff3d00', left: 4, elevation: 5 },
-  botaoMenu: { padding: 5 },
+  botaoMenu: { padding: 5, position: 'relative' },
   iconeMenu: { fontSize: 30, color: '#fff', fontWeight: 'bold' },
+  badgeMenuRecursos: {
+    position: 'absolute',
+    top: 4,
+    right: 2,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#dc3545',
+    borderWidth: 1.5,
+    borderColor: '#fff',
+  },
   containerFlutuante: {
     width: '100%',
     alignItems: 'center',

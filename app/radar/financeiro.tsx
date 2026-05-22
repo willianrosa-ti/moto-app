@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, StatusBar } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const mesesDoAno = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
@@ -144,7 +145,12 @@ export default function FinanceiroMotorista() {
     : 1;
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView
+      style={[styles.safeArea, { backgroundColor: temaAgencia.corPrimaria }]}
+      edges={['top', 'left', 'right']}
+    >
+      <StatusBar backgroundColor={temaAgencia.corPrimaria} barStyle="light-content" />
+      <View style={styles.container}>
       {/* CABEÇALHO */}
       <View style={[styles.cabecalho, { backgroundColor: temaAgencia.corPrimaria }]}>
         <TouchableOpacity style={styles.botaoVoltar} onPress={() => navegar.back()}>
@@ -234,11 +240,13 @@ export default function FinanceiroMotorista() {
           </>
         )}
       </ScrollView>
-    </View>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: { flex: 1 },
   container: { flex: 1, backgroundColor: '#f5f6fa' },
   cabecalho: { 
     backgroundColor: '#28a745', 

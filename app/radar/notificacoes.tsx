@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const API_BASE = 'https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net';
 
@@ -132,7 +133,7 @@ export default function NotificacoesAgencia() {
   }, []);
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar backgroundColor={temaAgencia.corPrimaria} barStyle="light-content" />
 
       <View style={[styles.cabecalho, { backgroundColor: temaAgencia.corPrimaria }]}>
@@ -193,7 +194,7 @@ export default function NotificacoesAgencia() {
           )}
         </ScrollView>
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 

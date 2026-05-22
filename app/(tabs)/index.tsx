@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage'; // <-- A nova memória do celular!
 
 export default function App() {
@@ -47,7 +48,7 @@ export default function App() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
       <View style={styles.card}>
         
         {/* CABEÇALHO */}
@@ -101,7 +102,7 @@ export default function App() {
 
         </View>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 

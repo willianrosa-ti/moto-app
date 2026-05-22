@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, ScrollView, T
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const API_BASE = 'https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net';
 
@@ -149,7 +150,7 @@ export default function SuporteTecnico() {
   };
 
   return (
-    <View style={styles.telaSuporte}>
+    <SafeAreaView style={styles.telaSuporte} edges={['top', 'left', 'right']}>
       <StatusBar backgroundColor={temaAgencia.corPrimaria} barStyle="light-content" />
 
       <View style={[styles.cabecalho, { backgroundColor: temaAgencia.corPrimaria }]}>
@@ -251,7 +252,7 @@ export default function SuporteTecnico() {
           </TouchableOpacity>
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
