@@ -66,6 +66,7 @@ export default function Radar() {
 
   const corridasIgnoradas = useRef<any[]>([]); 
   const corridaAceitaRef = useRef(false);
+  const corridaRecebidaRef = useRef<any>(null);
   const statusOnlineRef = useRef(false);
   const qtdCorridasRef = useRef(0); // Referência para controlar o toque da buzina na lista
 
@@ -284,7 +285,7 @@ export default function Radar() {
     if (!statusOnline) return;
 
     enviarSinalDeVida();
-    const intervaloSinalDeVida = setInterval(enviarSinalDeVida, 15000);
+    const intervaloSinalDeVida = setInterval(enviarSinalDeVida, 5000);
 
     return () => clearInterval(intervaloSinalDeVida);
   }, [statusOnline]);
@@ -361,6 +362,11 @@ export default function Radar() {
     corridaAceitaRef.current = corridaAceita;
   }, [corridaAceita]);
 
+
+  useEffect(() => {
+    corridaRecebidaRef.current = corridaRecebida;
+  }, [corridaRecebida]);
+
   useEffect(() => {
     if (statusOnline && !corridaRecebida) {
       Animated.loop(
@@ -402,6 +408,29 @@ export default function Radar() {
 
     conexao.on("RespostaSuporteRecebida", () => {
       buscarNotificacoesSuporteMotorista();
+    });
+
+
+    conexao.on("CorridaCancelada", (payload: any) => {
+      const corridaIdCancelada = payload?.corridaId;
+
+      setSinalNovaCorrida(gatilho => gatilho + 1);
+      setCorridasDisponiveis((listaAtual) =>
+        listaAtual.filter((corrida) => corrida.id !== corridaIdCancelada)
+      );
+
+      const corridaAtual = corridaRecebidaRef.current;
+      if (corridaAtual && corridaAtual.id === corridaIdCancelada) {
+        setCorridaRecebida(null);
+        setCorridaAceita(false);
+        corridaAceitaRef.current = false;
+        setTempoRestante(15);
+
+        Alert.alert(
+          "Corrida cancelada",
+          payload?.mensagem || "Esta corrida foi cancelada pela agência."
+        );
+      }
     });
 
     conexao.on("ContaMotoristaAtualizada", (payload: any) => {
@@ -449,7 +478,7 @@ export default function Radar() {
           const listaCorridas = await resposta.json();
           const agora = Date.now();
           
-          corridasIgnoradas.current = corridasIgnoradas.current.filter((item: any) => (agora - item.instante) < 15000);
+          corridasIgnoradas.current = corridasIgnoradas.current.filter((item: any) => (agora - item.instante) < 5000);
           const idsIgnorados = corridasIgnoradas.current.map((i: any) => i.id);
 
           const corridasValidas = listaCorridas
@@ -791,7 +820,7 @@ export default function Radar() {
                     <Text style={styles.enderecoTextoLista} numberOfLines={2}>📍 Levar para: {corrida.destino}</Text>
                   </View>
                   <TouchableOpacity
-                    style={[styles.botaoAceitarLista, { backgroundColor: temaAgencia.corSecundaria }]}
+                    style={[styles.botaoAceitarLista, { backgroundColor: temaAgencia.corPrimaria }]}
                     onPress={() => aceitarCorridaReal(corrida)}
                   >
                     <Text style={styles.textoBotaoAceitarLista}>ACEITAR CORRIDA</Text>
@@ -833,7 +862,7 @@ export default function Radar() {
                   <TouchableOpacity style={styles.btnRecusar} onPress={recusarCorrida}>
                     <Text style={styles.btnTextoVermelho}>RECUSAR</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[styles.btnAceitar, { backgroundColor: temaAgencia.corSecundaria }]} onPress={() => aceitarCorridaReal()}>
+                  <TouchableOpacity style={[styles.btnAceitar, { backgroundColor: temaAgencia.corPrimaria }]} onPress={() => aceitarCorridaReal()}>
                     <Text style={styles.btnTextoBranco}>ACEITAR</Text>
                   </TouchableOpacity>
                 </View>
@@ -846,7 +875,7 @@ export default function Radar() {
                   styles.sonarWave, 
                   { transform: [{ scale: sonarScale }], opacity: sonarOpacity }
                 ]} />
-                <Text style={[styles.textoBuscando, { color: temaAgencia.corSecundaria }]}>Procurando passageiros...</Text>
+                <Text style={[styles.textoBuscando, { color: "#38d467" }]}>Procurando passageiros...</Text>
               </View>
             )}
           </>
