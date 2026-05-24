@@ -2,7 +2,7 @@
   "expo": {
     "name": "app-motorista",
     "slug": "app-motorista",
-    "version": "1.0.0",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "appmotorista",
@@ -20,7 +20,8 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.millin.motorista"
+      "package": "com.millin.motorista",
+      "versionCode": 5
     },
     "web": {
       "output": "static",
@@ -28,6 +29,7 @@
     },
     "plugins": [
       "expo-router",
+      "./plugins/with-android-overlay",
       [
         "expo-splash-screen",
         {

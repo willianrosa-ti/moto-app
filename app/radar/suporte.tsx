@@ -15,6 +15,7 @@ type TemaAgencia = {
   nome: string;
   corPrimaria: string;
   corSecundaria: string;
+  corFonteCabecalho: string;
   telefone: string;
 };
 
@@ -22,6 +23,7 @@ const TEMA_AGENCIA_PADRAO: TemaAgencia = {
   nome: 'Agência',
   corPrimaria: COR_PRIMARIA_PADRAO,
   corSecundaria: COR_SECUNDARIA_PADRAO,
+  corFonteCabecalho: '#ffffff',
   telefone: TELEFONE_AGENCIA_PADRAO,
 };
 
@@ -45,10 +47,11 @@ export default function SuporteTecnico() {
 
   const carregarTemaAgenciaSalvo = async () => {
     try {
-      const [nome, corPrimaria, corSecundaria, telefone] = await Promise.all([
+      const [nome, corPrimaria, corSecundaria, corFonteCabecalho, telefone] = await Promise.all([
         AsyncStorage.getItem('nomeAgencia'),
         AsyncStorage.getItem('corAgenciaPrimaria'),
         AsyncStorage.getItem('corAgenciaSecundaria'),
+        AsyncStorage.getItem('corFonteCabecalhoAgencia'),
         AsyncStorage.getItem('telefoneAgencia'),
       ]);
 
@@ -56,6 +59,7 @@ export default function SuporteTecnico() {
         nome: nome?.trim() || TEMA_AGENCIA_PADRAO.nome,
         corPrimaria: corPrimaria?.trim() || TEMA_AGENCIA_PADRAO.corPrimaria,
         corSecundaria: corSecundaria?.trim() || TEMA_AGENCIA_PADRAO.corSecundaria,
+        corFonteCabecalho: corFonteCabecalho?.trim() || TEMA_AGENCIA_PADRAO.corFonteCabecalho,
         telefone: telefone?.trim() || TEMA_AGENCIA_PADRAO.telefone,
       });
     } catch (erro) {
@@ -155,10 +159,10 @@ export default function SuporteTecnico() {
 
       <View style={[styles.cabecalho, { backgroundColor: temaAgencia.corPrimaria }]}>
         <TouchableOpacity style={styles.botaoVoltar} onPress={() => navegar.back()}>
-          <Ionicons name="arrow-back" size={28} color="#fff" />
+          <Ionicons name="arrow-back" size={28} color={temaAgencia.corFonteCabecalho} />
         </TouchableOpacity>
 
-        <Text style={styles.tituloCabecalho}>SUPORTE TÉCNICO</Text>
+        <Text style={[styles.tituloCabecalho, { color: temaAgencia.corFonteCabecalho }]}>SUPORTE TÉCNICO</Text>
 
         <View style={styles.espacadorCabecalho} />
       </View>

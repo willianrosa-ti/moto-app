@@ -16,12 +16,14 @@ type TemaAgencia = {
   nome: string;
   corPrimaria: string;
   corSecundaria: string;
+  corFonteCabecalho: string;
 };
 
 const TEMA_AGENCIA_PADRAO: TemaAgencia = {
   nome: 'Agência',
   corPrimaria: COR_PRIMARIA_PADRAO,
   corSecundaria: COR_SECUNDARIA_PADRAO,
+  corFonteCabecalho: '#ffffff',
 };
 
 
@@ -42,16 +44,18 @@ export default function FinanceiroMotorista() {
 
   const carregarTemaAgenciaSalvo = async () => {
     try {
-      const [nome, corPrimaria, corSecundaria] = await Promise.all([
+      const [nome, corPrimaria, corSecundaria, corFonteCabecalho] = await Promise.all([
         AsyncStorage.getItem('nomeAgencia'),
         AsyncStorage.getItem('corAgenciaPrimaria'),
         AsyncStorage.getItem('corAgenciaSecundaria'),
+        AsyncStorage.getItem('corFonteCabecalhoAgencia'),
       ]);
 
       setTemaAgencia({
         nome: nome?.trim() || TEMA_AGENCIA_PADRAO.nome,
         corPrimaria: corPrimaria?.trim() || TEMA_AGENCIA_PADRAO.corPrimaria,
         corSecundaria: corSecundaria?.trim() || TEMA_AGENCIA_PADRAO.corSecundaria,
+        corFonteCabecalho: corFonteCabecalho?.trim() || TEMA_AGENCIA_PADRAO.corFonteCabecalho,
       });
     } catch (erro) {
       console.log('Erro ao carregar identidade visual da agência:', erro);
@@ -154,9 +158,9 @@ export default function FinanceiroMotorista() {
       {/* CABEÇALHO */}
       <View style={[styles.cabecalho, { backgroundColor: temaAgencia.corPrimaria }]}>
         <TouchableOpacity style={styles.botaoVoltar} onPress={() => navegar.back()}>
-          <Ionicons name="arrow-back" size={30} color="#fff"/>
+          <Ionicons name="arrow-back" size={30} color={temaAgencia.corFonteCabecalho}/>
         </TouchableOpacity>
-        <Text style={styles.tituloCabecalho}>MEU FINANCEIRO</Text>
+        <Text style={[styles.tituloCabecalho, { color: temaAgencia.corFonteCabecalho }]}>MEU FINANCEIRO</Text>
         <View style={{ width: 24 }}/>{/* Espaçador para centralizar o título */}
       </View>
 

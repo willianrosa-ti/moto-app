@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, Animated, Easing, ScrollView, Modal, TouchableWithoutFeedback, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, Animated, Easing, ScrollView, Modal, TouchableWithoutFeedback, StatusBar, Platform, AppState } from 'react-native';
+import type { AppStateStatus } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useKeepAwake } from 'expo-keep-awake';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import * as signalR from '@microsoft/signalr';
-import { Audio } from 'expo-av'; 
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av'; 
 import * as Location from 'expo-location'; 
 import { Ionicons } from '@expo/vector-icons'; 
+import AppOverlay from '@/native/AppOverlay';
 
 const ficheiroBuzina = require('../../assets/sounds/buzina.mp3');
 
@@ -16,12 +18,14 @@ const API_BASE = 'https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.ne
 const NOME_AGENCIA_PADRAO = 'RADAR DO MOTORISTA';
 const COR_PRIMARIA_PADRAO = '#28a745';
 const COR_SECUNDARIA_PADRAO = '#00c853';
+const COR_FONTE_CABECALHO_PADRAO = '#ffffff';
 const TELEFONE_AGENCIA_PADRAO = '+5500000000000';
 
 type TemaAgencia = {
   nome: string;
   corPrimaria: string;
   corSecundaria: string;
+  corFonteCabecalho: string;
   telefone: string;
 };
 
@@ -29,6 +33,7 @@ const TEMA_AGENCIA_PADRAO: TemaAgencia = {
   nome: NOME_AGENCIA_PADRAO,
   corPrimaria: COR_PRIMARIA_PADRAO,
   corSecundaria: COR_SECUNDARIA_PADRAO,
+  corFonteCabecalho: COR_FONTE_CABECALHO_PADRAO,
   telefone: TELEFONE_AGENCIA_PADRAO,
 };
 
@@ -77,6 +82,7 @@ export default function Radar() {
   const corridaAceitaRef = useRef(false);
   const corridaRecebidaRef = useRef<any>(null);
   const statusOnlineRef = useRef(false);
+  const estadoAppRef = useRef<AppStateStatus>(AppState.currentState);
   const qtdCorridasRef = useRef(0); // Referência para controlar o toque da buzina na lista
 
   const animacaoRadar = useRef(new Animated.Value(0)).current;
@@ -85,10 +91,11 @@ export default function Radar() {
 
   const carregarTemaAgenciaSalvo = async () => {
     try {
-      const [nome, corPrimaria, corSecundaria, telefone] = await Promise.all([
+      const [nome, corPrimaria, corSecundaria, corFonteCabecalho, telefone] = await Promise.all([
         AsyncStorage.getItem('nomeAgencia'),
         AsyncStorage.getItem('corAgenciaPrimaria'),
         AsyncStorage.getItem('corAgenciaSecundaria'),
+        AsyncStorage.getItem('corFonteCabecalhoAgencia'),
         AsyncStorage.getItem('telefoneAgencia'),
       ]);
 
@@ -96,6 +103,7 @@ export default function Radar() {
         nome: nome?.trim() || TEMA_AGENCIA_PADRAO.nome,
         corPrimaria: corPrimaria?.trim() || TEMA_AGENCIA_PADRAO.corPrimaria,
         corSecundaria: corSecundaria?.trim() || TEMA_AGENCIA_PADRAO.corSecundaria,
+        corFonteCabecalho: corFonteCabecalho?.trim() || TEMA_AGENCIA_PADRAO.corFonteCabecalho,
         telefone: telefone?.trim() || TEMA_AGENCIA_PADRAO.telefone,
       });
     } catch (erro) {
@@ -147,6 +155,7 @@ export default function Radar() {
               await AsyncStorage.removeItem('nomeAgencia');
               await AsyncStorage.removeItem('corAgenciaPrimaria');
               await AsyncStorage.removeItem('corAgenciaSecundaria');
+              await AsyncStorage.removeItem('corFonteCabecalhoAgencia');
               await AsyncStorage.removeItem('logoAgencia');
               await AsyncStorage.removeItem('telefoneAgencia');
               
@@ -247,6 +256,15 @@ export default function Radar() {
     buscarGanhosDoDia();
     verificarCorridaAtiva(); // <-- Adicionamos a checagem logo ao abrir o App
     buscarNotificacoesSuporteMotorista();
+    Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+      shouldDuckAndroid: false,
+      playThroughEarpieceAndroid: false,
+    }).catch(() => {});
 
     const intervaloNotificacoes = setInterval(buscarNotificacoesSuporteMotorista, 30000);
     return () => clearInterval(intervaloNotificacoes);
@@ -255,6 +273,49 @@ export default function Radar() {
 
   useEffect(() => {
     statusOnlineRef.current = statusOnline;
+  }, [statusOnline]);
+
+  useEffect(() => {
+    const inscricao = AppState.addEventListener('change', (estado) => {
+      estadoAppRef.current = estado;
+      AppOverlay.setRideMonitorForeground(estado === 'active').catch(() => {});
+    });
+
+    AppOverlay.setRideMonitorForeground(AppState.currentState === 'active').catch(() => {});
+
+    return () => inscricao.remove();
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    let cancelado = false;
+
+    const sincronizarMonitorNativo = async () => {
+      try {
+        if (!statusOnline) {
+          await AppOverlay.stopRideMonitor();
+          return;
+        }
+
+        const token = await AsyncStorage.getItem('tokenMotorista');
+        if (cancelado) return;
+
+        if (token) {
+          await AppOverlay.setRideMonitorForeground(estadoAppRef.current === 'active');
+          await AppOverlay.startRideMonitor(token, API_BASE);
+        } else {
+          await AppOverlay.stopRideMonitor();
+        }
+      } catch (error) {
+      }
+    };
+
+    sincronizarMonitorNativo();
+
+    return () => {
+      cancelado = true;
+    };
   }, [statusOnline]);
 
   // Mantém o motorista realmente "online" no painel da agência.
@@ -354,16 +415,37 @@ export default function Radar() {
     };
   }, []);
 
+  const tocarBuzinaExpo = async () => {
+    const { sound } = await Audio.Sound.createAsync(ficheiroBuzina);
+    await sound.setVolumeAsync(1);
+    await sound.playAsync();
+    sound.setOnPlaybackStatusUpdate((status) => {
+      if (status.isLoaded && status.didJustFinish) {
+        sound.unloadAsync();
+      }
+    });
+  };
+
   const tocarBuzina = async () => {
+    if (Platform.OS === 'android' && estadoAppRef.current !== 'active') {
+      try {
+        await AppOverlay.playBuzina();
+        return;
+      } catch (error) {
+      }
+    }
+
     try {
-      const { sound } = await Audio.Sound.createAsync(ficheiroBuzina);
-      await sound.playAsync();
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
-          sound.unloadAsync();
-        }
-      });
+      await tocarBuzinaExpo();
+      return;
     } catch (error) {
+    }
+
+    if (Platform.OS === 'android') {
+      try {
+        await AppOverlay.playBuzina();
+      } catch (error) {
+      }
     }
   };
 
@@ -713,7 +795,7 @@ export default function Radar() {
       <View style={styles.telaRadar}>
         <StatusBar backgroundColor={temaAgencia.corPrimaria} barStyle="light-content" />
       <View style={[styles.cabecalhoRadar, { backgroundColor: temaAgencia.corPrimaria }]}>
-        <Text style={styles.tituloApp} numberOfLines={1}>{temaAgencia.nome.toUpperCase()}</Text>
+        <Text style={[styles.tituloApp, { color: temaAgencia.corFonteCabecalho }]} numberOfLines={1}>{temaAgencia.nome.toUpperCase()}</Text>
         
         <View style={styles.botoesCabecalho}>
           <View style={styles.statusTopoContainer}>
@@ -730,7 +812,7 @@ export default function Radar() {
           </View>
 
           <TouchableOpacity style={styles.botaoMenu} onPress={() => setMenuAberto(true)}>
-            <Text style={styles.iconeMenu}>≡</Text>
+            <Text style={[styles.iconeMenu, { color: temaAgencia.corFonteCabecalho }]}>≡</Text>
             {qtdNotificacoesSuporte > 0 && <View style={styles.badgeMenuRecursos} />}
           </TouchableOpacity>
         </View>

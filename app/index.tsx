@@ -73,6 +73,7 @@ export default function LoginMotorista() {
     await AsyncStorage.setItem('nomeAgencia', agencia?.nome || 'Agência');
     await AsyncStorage.setItem('corAgenciaPrimaria', agencia?.corPrimaria || '#1f2937');
     await AsyncStorage.setItem('corAgenciaSecundaria', agencia?.corSecundaria || '#38bdf8');
+    await AsyncStorage.setItem('corFonteCabecalhoAgencia', agencia?.corFonteCabecalho || '#ffffff');
     await AsyncStorage.setItem('logoAgencia', agencia?.logoUrl || '');
     await AsyncStorage.setItem('telefoneAgencia', agencia?.telefoneWhatsApp || '');
   };
@@ -179,18 +180,18 @@ export default function LoginMotorista() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
       <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
       <StatusBar backgroundColor="#1f2937" barStyle="light-content" />
 
       <View style={styles.card}>
         <View style={styles.header}>
-          <View style={styles.logoArea}>
-            <SimboloMilLin escuro />
-          </View>
-
           <Text style={styles.milLinName}>M I L - L I N</Text>
+
+          <View style={styles.logoArea}>
+            <SimboloMilLin />
+          </View>
           <Text style={styles.agencySubtitle}>Área do Mototaxista</Text>
         </View>
 
@@ -240,7 +241,7 @@ export default function LoginMotorista() {
             <Ionicons
               name={manterConectado ? 'checkbox' : 'square-outline'}
               size={24}
-              color="#38bdf8"
+              color="#ffffff"
             />
             <Text style={styles.textoLembrarMe}>Manter-me conectado</Text>
           </TouchableOpacity>
@@ -251,7 +252,7 @@ export default function LoginMotorista() {
             disabled={carregando}
           >
             {carregando ? (
-              <ActivityIndicator color="#ffffff" />
+              <ActivityIndicator color="#1f2937" />
             ) : (
               <Text style={styles.buttonText}>ENTRAR</Text>
             )}
@@ -271,34 +272,28 @@ export default function LoginMotorista() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#fcfcfc',
+    backgroundColor: '#1f2937',
   },
 
   container: {
     flex: 1,
-    backgroundColor: '#fcfcfc',
+    backgroundColor: '#1f2937',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 20,
   },
 
   card: {
-    backgroundColor: '#ffffff',
     width: '100%',
-    maxWidth: 360,
-    borderRadius: 24,
-    padding: 30,
+    maxWidth: 340,
+    paddingVertical: 10,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 10,
   },
 
   header: {
     alignItems: 'center',
-    marginBottom: 30,
+    marginBottom: 28,
   },
 
   logoArea: {
@@ -306,23 +301,22 @@ const styles = StyleSheet.create({
     height: 82,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    marginBottom: 18,
   },
 
   milLinName: {
-    fontSize: 28,
+    fontSize: 36,
     fontWeight: '900',
-    color: '#1f2937',
+    color: '#ffffff',
     letterSpacing: 2,
-    marginTop: 4,
+    marginBottom: 28,
   },
 
   agencySubtitle: {
-    fontSize: 12,
-    color: '#6b7280',
+    fontSize: 11,
+    color: '#e5e7eb',
     textTransform: 'uppercase',
-    letterSpacing: 1.2,
-    marginTop: 4,
+    letterSpacing: 3,
     fontWeight: '700',
   },
 
@@ -332,7 +326,7 @@ const styles = StyleSheet.create({
 
   inputGroup: {
     width: '100%',
-    marginBottom: 20,
+    marginBottom: 18,
     position: 'relative',
   },
 
@@ -340,24 +334,24 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -10,
     left: 12,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#1f2937',
     paddingHorizontal: 6,
     fontSize: 12,
     fontWeight: 'bold',
-    color: '#4b5563',
+    color: '#e5e7eb',
     zIndex: 1,
   },
 
   inputField: {
     width: '100%',
     borderWidth: 2,
-    borderColor: '#d1d5db',
+    borderColor: 'rgba(255,255,255,0.42)',
     borderRadius: 10,
     paddingVertical: 12,
     paddingHorizontal: 16,
     fontSize: 16,
-    color: '#1f2937',
-    backgroundColor: '#ffffff',
+    color: '#ffffff',
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
 
   caixaLembrarMe: {
@@ -370,12 +364,12 @@ const styles = StyleSheet.create({
   textoLembrarMe: {
     marginLeft: 8,
     fontSize: 14,
-    color: '#4b5563',
+    color: '#e5e7eb',
     fontWeight: 'bold',
   },
 
   button: {
-    backgroundColor: '#1f2937',
+    backgroundColor: '#ffffff',
     width: '100%',
     paddingVertical: 14,
     borderRadius: 10,
@@ -388,19 +382,19 @@ const styles = StyleSheet.create({
   },
 
   buttonText: {
-    color: '#ffffff',
+    color: '#1f2937',
     fontSize: 16,
-    fontWeight: 'bold',
-    letterSpacing: 1,
+    fontWeight: '900',
+    letterSpacing: 3,
   },
 
   rodape: {
     marginTop: 22,
     fontSize: 11,
-    color: '#9ca3af',
+    color: '#e5e7eb',
     fontWeight: '600',
     textTransform: 'uppercase',
-    letterSpacing: 0.7,
+    letterSpacing: 2,
   },
 });
 
@@ -410,47 +404,45 @@ const styles = StyleSheet.create({
 const milLinStyles = StyleSheet.create({
   telaCarregamento: {
     flex: 1,
-    backgroundColor: '#1f2937',
+    backgroundColor: '#1f2937', 
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   tituloMilLinBranco: {
     fontSize: 36,
-    fontWeight: '900',
-    color: '#ffffff',
-    letterSpacing: 2,
-    marginBottom: 28,
-  },
-
-  textoCarregando: {
-    fontSize: 11,
     fontWeight: 'bold',
-    color: '#e5e7eb',
-    letterSpacing: 3,
-    marginTop: 34,
+    color: '#ffffff', 
+    letterSpacing: 2,
+    marginBottom: 20, 
   },
-
+  textoCarregando: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#e8f5e9', 
+    letterSpacing: 3, 
+    marginTop: 280, 
+  },
   containerLogo: {
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   notebookTela: {
     width: 100,
     height: 50,
-    borderRadius: 8,
+    backgroundColor: 'white',
+    borderRadius: 8, 
     marginTop: 0,
     marginHorizontal: 0,
+    shadowColor: 'rgba(214, 234, 248, 0.699)',
     shadowOffset: { width: 1, height: 1 },
     shadowOpacity: 1,
     shadowRadius: 13,
-    elevation: 5,
+    elevation: 5, 
   },
-
   notebookBase: {
     width: 108,
     height: 15,
+    backgroundColor: 'white',
     borderTopLeftRadius: 0,
     borderTopRightRadius: 100,
     borderBottomRightRadius: 0,
@@ -458,10 +450,11 @@ const milLinStyles = StyleSheet.create({
     marginLeft: 10,
     marginTop: 1,
     marginBottom: 15,
+    shadowColor: '#1a1717',
     shadowOffset: { width: 3, height: 11 },
     shadowOpacity: 0.8,
     shadowRadius: 11,
-    elevation: 10,
+    elevation: 10, 
   },
 
   logoClara: {
