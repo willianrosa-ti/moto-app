@@ -55,7 +55,9 @@ export async function prepararNotificacoesWeb(
     return { supported: true, permission, subscribed: false, reason: 'push-unavailable' };
   }
 
-  if (!WEB_PUSH_PUBLIC_KEY) {
+  const chavePublica = WEB_PUSH_PUBLIC_KEY || await buscarChavePublicaWebPush(apiBase);
+
+  if (!chavePublica) {
     return { supported: true, permission, subscribed: false, reason: 'missing-vapid-key' };
   }
 
@@ -63,7 +65,7 @@ export async function prepararNotificacoesWeb(
     const inscricaoAtual = await registro.pushManager.getSubscription();
     const inscricao = inscricaoAtual || await registro.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(WEB_PUSH_PUBLIC_KEY),
+      applicationServerKey: urlBase64ToUint8Array(chavePublica),
     });
 
     await enviarInscricaoParaApi(apiBase, token, inscricao);
@@ -115,6 +117,21 @@ async function enviarInscricaoParaApi(apiBase: string, token: string, inscricao:
       subscription: inscricao.toJSON(),
     }),
   });
+}
+
+async function buscarChavePublicaWebPush(apiBase: string) {
+  try {
+    const resposta = await fetch(`${apiBase.replace(/\/+$/, '')}/api/WebPush/chave-publica`);
+
+    if (!resposta.ok) {
+      return '';
+    }
+
+    const dados = await resposta.json();
+    return typeof dados?.publicKey === 'string' ? dados.publicKey : '';
+  } catch {
+    return '';
+  }
 }
 
 function urlBase64ToUint8Array(base64String: string) {

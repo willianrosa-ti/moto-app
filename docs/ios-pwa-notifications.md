@@ -10,13 +10,21 @@ O iPhone nao permite sobreposicao sobre outros apps. Para alertar o motorista fo
 - Se uma corrida chega enquanto o PWA esta aberto, o app mostra notificacao local.
 - Para receber alerta com o PWA em segundo plano, o backend precisa enviar Web Push.
 
-## Variaveis na Vercel
+## Variaveis no host do PWA
 
-Configure no projeto da Vercel:
+Se o PWA estiver na Vercel, voce pode configurar a chave publica no host do site.
+
+Na Vercel:
 
 ```txt
 EXPO_PUBLIC_WEB_PUSH_PUBLIC_KEY=<chave publica VAPID>
 EXPO_PUBLIC_WEB_PUSH_ENDPOINT=<endpoint opcional para salvar inscricao>
+```
+
+No Azure Static Web Apps, essa variavel e opcional. O PWA tambem consegue buscar a chave publica direto na API:
+
+```txt
+GET /api/WebPush/chave-publica
 ```
 
 Se `EXPO_PUBLIC_WEB_PUSH_ENDPOINT` nao for informado, o app tenta usar:

@@ -4,6 +4,7 @@
   "version": "1.0.4",
   "scripts": {
     "start": "expo start",
+    "build": "npm run build:web",
     "build:web": "expo export --platform web --output-dir dist",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
