@@ -10,7 +10,6 @@ import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import * as Location from 'expo-location'; 
 import { Ionicons } from '@expo/vector-icons'; 
 import AppOverlay from '@/native/AppOverlay';
-import { notificarCorridaWeb, prepararNotificacoesWeb } from '@/utils/webNotifications';
 
 const ficheiroBuzina = require('../../assets/sounds/buzina.mp3');
 
@@ -84,7 +83,6 @@ export default function Radar() {
   const corridaRecebidaRef = useRef<any>(null);
   const statusOnlineRef = useRef(false);
   const estadoAppRef = useRef<AppStateStatus>(AppState.currentState);
-  const ultimaCorridaNotificadaWebRef = useRef<string | number | null>(null);
   const qtdCorridasRef = useRef(0); // Referência para controlar o toque da buzina na lista
 
   const animacaoRadar = useRef(new Animated.Value(0)).current;
@@ -451,22 +449,11 @@ export default function Radar() {
     }
   };
 
-  const notificarCorridaNoWeb = async (corrida: any) => {
-    if (Platform.OS !== 'web' || !corrida) return;
-
-    const idCorrida = corrida.id || `${corrida.busca}-${corrida.destino}-${corrida.valor}`;
-    if (ultimaCorridaNotificadaWebRef.current === idCorrida) return;
-
-    ultimaCorridaNotificadaWebRef.current = idCorrida;
-    await notificarCorridaWeb(corrida);
-  };
-
   // Som para o modo RADAR
   useEffect(() => {
     if (corridaRecebida && !corridaAceita && modoVisualizacao === 'radar') {
       setTempoRestante(15); 
       tocarBuzina();
-      notificarCorridaNoWeb(corridaRecebida).catch(() => {});
     }
   }, [corridaRecebida, modoVisualizacao]);
 
@@ -611,7 +598,6 @@ export default function Radar() {
           // Toca buzina sempre que o número de corridas novas for maior que o anterior (CORREÇÃO DA BUZINA)
           if (modoVisualizacao === 'lista' && corridasValidas.length > qtdCorridasRef.current) {
             tocarBuzina();
-            notificarCorridaNoWeb(corridasValidas[0]).catch(() => {});
           }
           qtdCorridasRef.current = corridasValidas.length;
 
@@ -684,16 +670,10 @@ export default function Radar() {
         setCorridasDisponiveis([]); // Limpa a lista ao deslogar
         setCorridaAceita(false);
         corridasIgnoradas.current = []; 
-        if (!novoStatus) {
-          ultimaCorridaNotificadaWebRef.current = null;
-        }
         setTempoRestante(15);
 
         if (novoStatus) {
           await enviarSinalDeVida();
-          if (token) {
-            prepararNotificacoesWeb(API_BASE, token).catch(() => {});
-          }
         }
       } else {
         const textoErro = await resposta.text();
