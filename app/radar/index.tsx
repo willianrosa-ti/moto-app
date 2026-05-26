@@ -1,15 +1,63 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, Animated, Easing, ScrollView, Modal, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, Animated, Easing, ScrollView, Modal, TouchableWithoutFeedback, StatusBar, Platform, AppState } from 'react-native';
+import type { AppStateStatus } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useKeepAwake } from 'expo-keep-awake';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import * as signalR from '@microsoft/signalr';
-import { Audio } from 'expo-av'; 
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av'; 
 import * as Location from 'expo-location'; 
 import { Ionicons } from '@expo/vector-icons'; 
+import AppOverlay from '@/native/AppOverlay';
+import WebPwaNotice from '@/components/WebPwaNotice';
 
 const ficheiroBuzina = require('../../assets/sounds/buzina.mp3');
 
+const API_BASE = 'https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net';
+
+const NOME_AGENCIA_PADRAO = 'RADAR DO MOTORISTA';
+const COR_PRIMARIA_PADRAO = '#28a745';
+const COR_SECUNDARIA_PADRAO = '#00c853';
+const COR_FONTE_CABECALHO_PADRAO = '#ffffff';
+const TELEFONE_AGENCIA_PADRAO = '+5500000000000';
+
+type TemaAgencia = {
+  nome: string;
+  corPrimaria: string;
+  corSecundaria: string;
+  corFonteCabecalho: string;
+  telefone: string;
+};
+
+const TEMA_AGENCIA_PADRAO: TemaAgencia = {
+  nome: NOME_AGENCIA_PADRAO,
+  corPrimaria: COR_PRIMARIA_PADRAO,
+  corSecundaria: COR_SECUNDARIA_PADRAO,
+  corFonteCabecalho: COR_FONTE_CABECALHO_PADRAO,
+  telefone: TELEFONE_AGENCIA_PADRAO,
+};
+
+const formatarQuilometragem = (valor: any) => {
+  const numero = Number(valor || 0);
+  return `${numero.toFixed(1).replace('.', ',')} km de distância`;
+};
+
+
+// --- SÍMBOLO MIL-LIN (Notebook CSS traduzido para React Native) ---
+const SimboloMilLin = () => (
+  <View style={milLinStyles.containerLogo}>
+    {/* Parte de Cima do Notebook (Tela) */}
+    <View style={milLinStyles.notebookTela} />
+    
+    {/* Parte de Baixo do Notebook (Teclado/Base) */}
+    <View style={milLinStyles.notebookBase} />
+  </View>
+);
+
 export default function Radar() {
+  useKeepAwake();
+
   const [statusOnline, setStatusOnline] = useState(false);
   const [corridaRecebida, setCorridaRecebida] = useState<any>(null);
   const [corridaAceita, setCorridaAceita] = useState(false);
@@ -17,7 +65,8 @@ export default function Radar() {
   const [tempoRestante, setTempoRestante] = useState(15);
   const [localizacaoMotorista, setLocalizacaoMotorista] = useState<Location.LocationObject | null>(null);
   const [menuAberto, setMenuAberto] = useState(false);
-  const [modalCorridasAberto, setModalCorridasAberto] = useState(false);
+  const [qtdNotificacoesSuporte, setQtdNotificacoesSuporte] = useState(0);
+  const [temaAgencia, setTemaAgencia] = useState<TemaAgencia>(TEMA_AGENCIA_PADRAO);
   
   const [valorDiario, setValorDiario] = useState<number>(0); 
   const [mostrarValor, setMostrarValor] = useState(false); 
@@ -26,13 +75,104 @@ export default function Radar() {
   const [modoVisualizacao, setModoVisualizacao] = useState<'radar' | 'lista'>('radar');
   const [corridasDisponiveis, setCorridasDisponiveis] = useState<any[]>([]);
 
+  // NOVO ESTADO: Controla a tela de carregamento/transição da MIL-LIN
+  const [processandoAcesso, setProcessandoAcesso] = useState(false);
+
+
   const corridasIgnoradas = useRef<any[]>([]); 
   const corridaAceitaRef = useRef(false);
+  const corridaRecebidaRef = useRef<any>(null);
   const statusOnlineRef = useRef(false);
+  const estadoAppRef = useRef<AppStateStatus>(AppState.currentState);
   const qtdCorridasRef = useRef(0); // Referência para controlar o toque da buzina na lista
 
   const animacaoRadar = useRef(new Animated.Value(0)).current;
   const navegar = useRouter();
+
+
+  const carregarTemaAgenciaSalvo = async () => {
+    try {
+      const [nome, corPrimaria, corSecundaria, corFonteCabecalho, telefone] = await Promise.all([
+        AsyncStorage.getItem('nomeAgencia'),
+        AsyncStorage.getItem('corAgenciaPrimaria'),
+        AsyncStorage.getItem('corAgenciaSecundaria'),
+        AsyncStorage.getItem('corFonteCabecalhoAgencia'),
+        AsyncStorage.getItem('telefoneAgencia'),
+      ]);
+
+      setTemaAgencia({
+        nome: nome?.trim() || TEMA_AGENCIA_PADRAO.nome,
+        corPrimaria: corPrimaria?.trim() || TEMA_AGENCIA_PADRAO.corPrimaria,
+        corSecundaria: corSecundaria?.trim() || TEMA_AGENCIA_PADRAO.corSecundaria,
+        corFonteCabecalho: corFonteCabecalho?.trim() || TEMA_AGENCIA_PADRAO.corFonteCabecalho,
+        telefone: telefone?.trim() || TEMA_AGENCIA_PADRAO.telefone,
+      });
+    } catch (erro) {
+      console.log('Erro ao carregar identidade visual da agência:', erro);
+    }
+  };
+
+  // --- FUNÇÃO PARA GERENCIAR CLIQUES NO MENU COM TRANSIÇÃO ---
+  const executarAcaoMenu = (acao: 'financeiro' | 'notificacoes' | 'suporte') => {
+    setMenuAberto(false); // Fecha o menu lateral
+    setProcessandoAcesso(true); // Abre a tela de carregamento da MIL-LIN
+
+    setTimeout(() => {
+      setProcessandoAcesso(false); // Esconde o carregamento
+      if (acao === 'financeiro') {
+        navegar.push('/radar/financeiro' as any);
+      } else if (acao === 'notificacoes') {
+        navegar.push('/radar/notificacoes' as any);
+      } else if (acao === 'suporte') {
+        navegar.push('/radar/suporte' as any);
+      }
+    }, 1000);
+  };
+
+  // --- NOVA FUNÇÃO DE SAIR (LOGOUT) ---
+  const fazerLogout = async () => {
+    if (corridaAceita) {
+      Alert.alert(
+        "Corrida em andamento",
+        "Finalize a corrida antes de sair do app."
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Sair do App",
+      "Tem certeza que deseja desconectar sua conta?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        { 
+          text: "Sair", 
+          style: "destructive",
+          onPress: async () => {
+            try {
+              // Limpa a memória do celular
+              await AsyncStorage.removeItem('tokenMotorista');
+              await AsyncStorage.removeItem('nomeMotorista');
+              await AsyncStorage.removeItem('idMotorista');
+              await AsyncStorage.removeItem('nomeAgencia');
+              await AsyncStorage.removeItem('corAgenciaPrimaria');
+              await AsyncStorage.removeItem('corAgenciaSecundaria');
+              await AsyncStorage.removeItem('corFonteCabecalhoAgencia');
+              await AsyncStorage.removeItem('logoAgencia');
+              await AsyncStorage.removeItem('telefoneAgencia');
+              
+              setStatusOnline(false); // Desliga o radar por segurança
+              setMenuAberto(false);
+              
+              // Substitua '/' pela rota do seu arquivo de Login, caso seja diferente
+              navegar.replace('/'); 
+            } catch (erro) {
+              Alert.alert("Erro", "Não foi possível sair.");
+            }
+          }
+        }
+      ]
+    );
+  };
 
   // --- INÍCIO DA INTEGRAÇÃO COM O BANCO PARA OS GANHOS ---
   const buscarGanhosDoDia = async () => {
@@ -42,7 +182,7 @@ export default function Radar() {
 
       const mesAtual = new Date().getMonth() + 1; 
       
-      const resposta = await fetch(`http://192.168.15.6:5022/api/Motorista/financeiro?filtro=hoje&mes=${mesAtual}`, {
+      const resposta = await fetch(`${API_BASE}/api/Motorista/financeiro?filtro=hoje&mes=${mesAtual}`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -59,13 +199,174 @@ export default function Radar() {
     }
   };
 
+  // --- NOVA FUNÇÃO: VERIFICAR E RECUPERAR CORRIDA ATIVA ---
+  const verificarCorridaAtiva = async () => {
+    try {
+      const token = await AsyncStorage.getItem('tokenMotorista');
+      if (!token) return;
+
+      const resposta = await fetch(`${API_BASE}/api/Corrida/ativa`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (resposta.status === 200) {
+        const corrida = await resposta.json();
+        if (corrida) {
+          setCorridaRecebida(corrida); // Puxa os dados para a tela
+          setCorridaAceita(true);      // Força o app a abrir a tela de "EM CORRIDA"
+          setStatusOnline(true);       // Liga o radar para o GPS continuar rastreando
+        }
+      }
+    } catch (erro) {
+      console.log("Erro ao recuperar corrida ativa:", erro);
+    }
+  };
+
+  const buscarNotificacoesSuporteMotorista = async () => {
+    try {
+      const token = await AsyncStorage.getItem('tokenMotorista');
+      if (!token) return;
+
+      const resposta = await fetch(`${API_BASE}/api/Suporte/minhas-respostas`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (resposta.ok) {
+        const lista = await resposta.json();
+        const naoLidas = Array.isArray(lista)
+          ? lista.filter((item: any) => item.respostaAgencia && item.lidaPeloMotorista === false).length
+          : 0;
+
+        setQtdNotificacoesSuporte(naoLidas);
+      }
+    } catch (erro) {
+      console.log('Erro ao buscar notificações de suporte:', erro);
+    }
+  };
+
   useEffect(() => {
+    carregarTemaAgenciaSalvo();
     buscarGanhosDoDia();
+    verificarCorridaAtiva(); // <-- Adicionamos a checagem logo ao abrir o App
+    buscarNotificacoesSuporteMotorista();
+    Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+      shouldDuckAndroid: false,
+      playThroughEarpieceAndroid: false,
+    }).catch(() => {});
+
+    const intervaloNotificacoes = setInterval(buscarNotificacoesSuporteMotorista, 30000);
+    return () => clearInterval(intervaloNotificacoes);
   }, []);
   // --- FIM DA INTEGRAÇÃO ---
 
   useEffect(() => {
     statusOnlineRef.current = statusOnline;
+  }, [statusOnline]);
+
+  useEffect(() => {
+    const inscricao = AppState.addEventListener('change', (estado) => {
+      estadoAppRef.current = estado;
+      AppOverlay.setRideMonitorForeground(estado === 'active').catch(() => {});
+    });
+
+    AppOverlay.setRideMonitorForeground(AppState.currentState === 'active').catch(() => {});
+
+    return () => inscricao.remove();
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    let cancelado = false;
+
+    const sincronizarMonitorNativo = async () => {
+      try {
+        if (!statusOnline) {
+          await AppOverlay.stopRideMonitor();
+          return;
+        }
+
+        const token = await AsyncStorage.getItem('tokenMotorista');
+        if (cancelado) return;
+
+        if (token) {
+          await AppOverlay.setRideMonitorForeground(estadoAppRef.current === 'active');
+          await AppOverlay.startRideMonitor(token, API_BASE);
+        } else {
+          await AppOverlay.stopRideMonitor();
+        }
+      } catch (error) {
+      }
+    };
+
+    sincronizarMonitorNativo();
+
+    return () => {
+      cancelado = true;
+    };
+  }, [statusOnline]);
+
+  // Mantém o motorista realmente "online" no painel da agência.
+  // Mesmo que o GPS demore a mandar uma posição nova, este pulso atualiza a última atividade no backend.
+  const enviarSinalDeVida = async () => {
+    try {
+      const token = await AsyncStorage.getItem('tokenMotorista');
+      if (!token) return;
+
+      try {
+        const localizacaoAtual = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+
+        setLocalizacaoMotorista(localizacaoAtual);
+
+        await fetch(`${API_BASE}/api/Motorista/atualizar-localizacao`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            latitude: localizacaoAtual.coords.latitude,
+            longitude: localizacaoAtual.coords.longitude
+          })
+        });
+      } catch (erroLocalizacao) {
+        // Fallback: mantém o sinal de vida pelo status online, mesmo se o GPS falhar por alguns segundos.
+        await fetch(`${API_BASE}/api/Motorista/alterar-status-online`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(true)
+        });
+      }
+    } catch (erro) {
+      console.log('Erro ao enviar sinal de vida:', erro);
+    }
+  };
+
+  useEffect(() => {
+    if (!statusOnline) return;
+
+    enviarSinalDeVida();
+    const intervaloSinalDeVida = setInterval(enviarSinalDeVida, 5000);
+
+    return () => clearInterval(intervaloSinalDeVida);
   }, [statusOnline]);
 
   useEffect(() => {
@@ -90,7 +391,7 @@ export default function Radar() {
           if (statusOnlineRef.current) {
             try {
               const token = await AsyncStorage.getItem('tokenMotorista');
-              await fetch('http://192.168.15.6:5022/api/Motorista/atualizar-localizacao', {
+              await fetch(`${API_BASE}/api/Motorista/atualizar-localizacao`, {
                 method: 'POST',
                 headers: { 
                   'Content-Type': 'application/json',
@@ -115,16 +416,37 @@ export default function Radar() {
     };
   }, []);
 
+  const tocarBuzinaExpo = async () => {
+    const { sound } = await Audio.Sound.createAsync(ficheiroBuzina);
+    await sound.setVolumeAsync(1);
+    await sound.playAsync();
+    sound.setOnPlaybackStatusUpdate((status) => {
+      if (status.isLoaded && status.didJustFinish) {
+        sound.unloadAsync();
+      }
+    });
+  };
+
   const tocarBuzina = async () => {
+    if (Platform.OS === 'android' && estadoAppRef.current !== 'active') {
+      try {
+        await AppOverlay.playBuzina();
+        return;
+      } catch (error) {
+      }
+    }
+
     try {
-      const { sound } = await Audio.Sound.createAsync(ficheiroBuzina);
-      await sound.playAsync();
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
-          sound.unloadAsync();
-        }
-      });
+      await tocarBuzinaExpo();
+      return;
     } catch (error) {
+    }
+
+    if (Platform.OS === 'android') {
+      try {
+        await AppOverlay.playBuzina();
+      } catch (error) {
+      }
     }
   };
 
@@ -139,6 +461,11 @@ export default function Radar() {
   useEffect(() => {
     corridaAceitaRef.current = corridaAceita;
   }, [corridaAceita]);
+
+
+  useEffect(() => {
+    corridaRecebidaRef.current = corridaRecebida;
+  }, [corridaRecebida]);
 
   useEffect(() => {
     if (statusOnline && !corridaRecebida) {
@@ -157,11 +484,18 @@ export default function Radar() {
 
   useEffect(() => {
     const conexao = new signalR.HubConnectionBuilder()
-      .withUrl("http://192.168.15.6:5022/hub-corridas")
+      .withUrl(`${API_BASE}/hub-corridas`)
       .withAutomaticReconnect()
       .build();
 
-    conexao.start().catch(() => {});
+    conexao.start()
+      .then(async () => {
+        const idMotorista = await AsyncStorage.getItem('idMotorista');
+        if (idMotorista) {
+          await conexao.invoke('EntrarNoGrupoMotorista', idMotorista);
+        }
+      })
+      .catch(() => {});
 
     conexao.on("NovaCorridaDisponivel", () => {
       setSinalNovaCorrida(gatilho => gatilho + 1);
@@ -170,6 +504,54 @@ export default function Radar() {
     // NOVO: Gatilho para limpar a tela na mesma hora que alguém aceitar
     conexao.on("AtualizarCorridas", () => {
       setSinalNovaCorrida(gatilho => gatilho + 1);
+    });
+
+    conexao.on("RespostaSuporteRecebida", () => {
+      buscarNotificacoesSuporteMotorista();
+    });
+
+
+    conexao.on("CorridaCancelada", (payload: any) => {
+      const corridaIdCancelada = payload?.corridaId;
+
+      setSinalNovaCorrida(gatilho => gatilho + 1);
+      setCorridasDisponiveis((listaAtual) =>
+        listaAtual.filter((corrida) => corrida.id !== corridaIdCancelada)
+      );
+
+      const corridaAtual = corridaRecebidaRef.current;
+      if (corridaAtual && corridaAtual.id === corridaIdCancelada) {
+        setCorridaRecebida(null);
+        setCorridaAceita(false);
+        corridaAceitaRef.current = false;
+        setTempoRestante(15);
+
+        Alert.alert(
+          "Corrida cancelada",
+          payload?.mensagem || "Esta corrida foi cancelada pela agência."
+        );
+      }
+    });
+
+    conexao.on("ContaMotoristaAtualizada", (payload: any) => {
+      buscarNotificacoesSuporteMotorista();
+
+      if (payload?.suspenso === true) {
+        setStatusOnline(false);
+        statusOnlineRef.current = false;
+        setCorridaRecebida(null);
+        setCorridaAceita(false);
+        setCorridasDisponiveis([]);
+        Alert.alert(
+          "Conta suspensa",
+          payload?.respostaAgencia || "Sua conta foi suspensa! Caso você não concorde, favor entrar em contato."
+        );
+      } else if (payload?.tipoProblema === "Conta editada") {
+        Alert.alert(
+          "Conta editada",
+          payload?.respostaAgencia || "Sua conta foi editada! Caso não concorde, favor entrar em contato."
+        );
+      }
     });
 
     return () => { 
@@ -185,7 +567,7 @@ export default function Radar() {
 
       try {
         const token = await AsyncStorage.getItem('tokenMotorista'); 
-        const resposta = await fetch('http://192.168.15.6:5022/api/Corrida/pendentes', {
+        const resposta = await fetch(`${API_BASE}/api/Corrida/pendentes`, {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${token}` 
@@ -196,7 +578,7 @@ export default function Radar() {
           const listaCorridas = await resposta.json();
           const agora = Date.now();
           
-          corridasIgnoradas.current = corridasIgnoradas.current.filter((item: any) => (agora - item.instante) < 15000);
+          corridasIgnoradas.current = corridasIgnoradas.current.filter((item: any) => (agora - item.instante) < 5000);
           const idsIgnorados = corridasIgnoradas.current.map((i: any) => i.id);
 
           const corridasValidas = listaCorridas
@@ -241,7 +623,7 @@ export default function Radar() {
     if (statusOnline) {
       buscarCorridasReais(); 
       // CORREÇÃO DO TEMPO DE BUSCA (de 25000 para 5000 - 5 segundos)
-      intervaloVida = setInterval(buscarCorridasReais, 5000); 
+      intervaloVida = setInterval(buscarCorridasReais, 1500); 
     }
 
     return () => clearInterval(intervaloVida);
@@ -264,8 +646,16 @@ export default function Radar() {
     const novoStatus = !statusOnline;
     const token = await AsyncStorage.getItem('tokenMotorista');
 
+    if (!novoStatus && corridaAceita) {
+      Alert.alert(
+        "Corrida em andamento",
+        "Finalize a corrida antes de desligar o radar."
+      );
+      return;
+    }
+
     try {
-      const resposta = await fetch('http://192.168.15.6:5022/api/Motorista/alterar-status-online', {
+      const resposta = await fetch(`${API_BASE}/api/Motorista/alterar-status-online`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -276,13 +666,25 @@ export default function Radar() {
 
       if (resposta.ok) {
         setStatusOnline(novoStatus);
+        statusOnlineRef.current = novoStatus;
         setCorridaRecebida(null);
         setCorridasDisponiveis([]); // Limpa a lista ao deslogar
         setCorridaAceita(false);
         corridasIgnoradas.current = []; 
         setTempoRestante(15);
+
+        if (novoStatus) {
+          await enviarSinalDeVida();
+        }
       } else {
-        Alert.alert("Erro", "Erro ao sincronizar status.");
+        const textoErro = await resposta.text();
+        let mensagemErro = "Erro ao sincronizar status.";
+        try {
+          mensagemErro = JSON.parse(textoErro).mensagem || mensagemErro;
+        } catch {
+          if (textoErro) mensagemErro = textoErro;
+        }
+        Alert.alert("Erro", mensagemErro);
       }
     } catch (erro) {
       Alert.alert("Erro", "Sem conexão.");
@@ -306,7 +708,7 @@ export default function Radar() {
     try {
       const token = await AsyncStorage.getItem('tokenMotorista');
       
-      const resposta = await fetch(`http://192.168.15.6:5022/api/Corrida/aceitar/${corridaAlvo.id}`, {
+      const resposta = await fetch(`${API_BASE}/api/Corrida/aceitar/${corridaAlvo.id}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -332,7 +734,7 @@ export default function Radar() {
     try {
       const token = await AsyncStorage.getItem('tokenMotorista');
       
-      const resposta = await fetch(`http://192.168.15.6:5022/api/Corrida/finalizar/${corridaRecebida.id}`, {
+      const resposta = await fetch(`${API_BASE}/api/Corrida/finalizar/${corridaRecebida.id}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -361,17 +763,40 @@ export default function Radar() {
     if (app === 'waze') {
       Linking.openURL(`https://waze.com/ul?q=${destinoEncoded}&navigate=yes`);
     } else {
-      Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=$${destinoEncoded}`);
+      Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${destinoEncoded}`);
     }
   };
+
 
   const sonarScale = animacaoRadar.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.5] });
   const sonarOpacity = animacaoRadar.interpolate({ inputRange: [0, 1], outputRange: [0.8, 0] });
 
+  // ==========================================
+  // --- RENDERIZAÇÃO DA TELA DE CARREGAMENTO MIL-LIN ---
+  // ==========================================
+  if (processandoAcesso) {
+    return (
+      <SafeAreaView style={milLinStyles.telaCarregamento} edges={['top', 'left', 'right', 'bottom']}>
+        <StatusBar backgroundColor="#1f2937" barStyle="light-content" />
+        
+        {/* Logo em branco "MIL-LIN" (como você pediu, em branco em cima do notebook) */}
+        <Text style={milLinStyles.tituloMilLinBranco}>M I L - L I N</Text>
+        
+        {/* Recriação do Símbolo em CSS */}
+        <SimboloMilLin />
+        
+        {/* Texto "CARREGANDO..." em baixo */}
+        <Text style={milLinStyles.textoCarregando}>C  A  R  R  E  G  A  N  D  O...</Text>
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <View style={styles.telaRadar}>
-      <View style={styles.cabecalhoRadar}>
-        <Text style={styles.tituloApp}>MOTO-TAXI THALES</Text>
+    <SafeAreaView style={[styles.areaSeguraApp, { backgroundColor: temaAgencia.corPrimaria }]} edges={['top', 'left', 'right']}>
+      <View style={styles.telaRadar}>
+        <StatusBar backgroundColor={temaAgencia.corPrimaria} barStyle="light-content" />
+      <View style={[styles.cabecalhoRadar, { backgroundColor: temaAgencia.corPrimaria }]}>
+        <Text style={[styles.tituloApp, { color: temaAgencia.corFonteCabecalho }]} numberOfLines={1}>{temaAgencia.nome.toUpperCase()}</Text>
         
         <View style={styles.botoesCabecalho}>
           <View style={styles.statusTopoContainer}>
@@ -388,7 +813,8 @@ export default function Radar() {
           </View>
 
           <TouchableOpacity style={styles.botaoMenu} onPress={() => setMenuAberto(true)}>
-            <Text style={styles.iconeMenu}>≡</Text>
+            <Text style={[styles.iconeMenu, { color: temaAgencia.corFonteCabecalho }]}>≡</Text>
+            {qtdNotificacoesSuporte > 0 && <View style={styles.badgeMenuRecursos} />}
           </TouchableOpacity>
         </View>
       </View>
@@ -396,7 +822,7 @@ export default function Radar() {
       <View style={styles.containerFlutuante}>
         <View style={styles.blocoGanhos}>
             <View style={styles.linhaValorVisibilidade}>
-            <Text style={styles.valorGanhos}>
+            <Text style={[styles.valorGanhos, { color: temaAgencia.corPrimaria }]}>
               {mostrarValor ? `R$ ${valorDiario.toFixed(2)}` : 'R$ ----'}
             </Text>
             <TouchableOpacity onPress={() => setMostrarValor(!mostrarValor)} style={styles.botaoOlho}>
@@ -406,50 +832,72 @@ export default function Radar() {
         </View>
       </View>
 
-      <Modal visible={menuAberto} transparent={true} animationType="fade">
-        <View style={styles.fundoModal}>
-          <View style={styles.caixaMenu}>
-            <TouchableOpacity style={styles.fecharMenu} onPress={() => setMenuAberto(false)}>
-              <Text style={styles.textoFechar}>X</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.itemMenu} onPress={() => { setMenuAberto(false); navegar.push('/radar/financeiro'); }}>
-              <Text style={styles.textoItemMenu}>Financeiro</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.itemMenu} onPress={() => { setMenuAberto(false); setModalCorridasAberto(true); }}>
-              <Text style={styles.textoItemMenu}>Corridas Disponíveis</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      {/* --- MENU MODERNO COM CLIQUE FORA E BOTÃO SAIR --- */}
+      <Modal 
+        visible={menuAberto} 
+        transparent={true} 
+        animationType="fade"
+        onRequestClose={() => setMenuAberto(false)} // Fecha ao apertar botão voltar do Android
+      >
+        <TouchableWithoutFeedback onPress={() => setMenuAberto(false)}>
+          <View style={styles.fundoModal}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <View style={styles.caixaMenu}>
+                
+                <Text style={styles.tituloMenu}>RECURSOS</Text>
+                <View style={styles.linhaSeparadoraMenu} />
+                
+                {/* Alterado para chamar a função com a transição MIL-LIN */}
+                <TouchableOpacity style={styles.itemMenu} onPress={() => executarAcaoMenu('financeiro')}>
+                  <Ionicons name="cash-outline" size={20} color={temaAgencia.corPrimaria} />
+                  <Text style={styles.textoItemMenu}>FINANCEIRO</Text>
+                </TouchableOpacity>
 
-      <Modal visible={modalCorridasAberto} animationType="slide">
-        <View style={styles.telaCorridasDisponiveis}>
-          <View style={styles.cabecalhoModal}>
-            <Text style={styles.tituloModal}>Corridas Disponíveis</Text>
-            <TouchableOpacity onPress={() => setModalCorridasAberto(false)}>
-              <Text style={styles.textoFechar}>Voltar</Text>
-            </TouchableOpacity>
+                <TouchableOpacity style={styles.itemMenu} onPress={() => executarAcaoMenu('notificacoes')}>
+                  <Ionicons name="notifications-outline" size={20} color={temaAgencia.corPrimaria} />
+                  <View style={styles.notificacaoMenuLinha}>
+                    <Text style={styles.textoItemMenu}>NOTIFICAÇÕES</Text>
+                    {qtdNotificacoesSuporte > 0 && (
+                      <View style={styles.badgeNotificacaoMenu}>
+                        <Text style={styles.textoBadgeNotificacaoMenu}>{qtdNotificacoesSuporte}</Text>
+                      </View>
+                    )}
+                  </View>
+                </TouchableOpacity>
+                
+                {/* Alterado o ícone e chamando a transição MIL-LIN */}
+                <TouchableOpacity style={styles.itemMenu} onPress={() => executarAcaoMenu('suporte')}>
+                  <Ionicons name="headset-outline" size={20} color={temaAgencia.corPrimaria} />
+                  <Text style={styles.textoItemMenu}>SUPORTE TECNICO</Text>
+                </TouchableOpacity>
+
+                {/* BOTÃO DE SAIR ADICIONADO AQUI */}
+                <TouchableOpacity style={styles.itemMenuSair} onPress={fazerLogout}>
+                  <Ionicons name="log-out-outline" size={20} color="#dc3545" />
+                  <Text style={styles.textoItemMenuSair}>Sair</Text>
+                </TouchableOpacity>
+
+              </View>
+            </TouchableWithoutFeedback>
           </View>
-          <Text style={styles.textoVazio}>Nenhuma corrida na lista geral no momento.</Text>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
       <ScrollView contentContainerStyle={styles.conteudoRadar}>
-        
+        <WebPwaNotice corPrimaria={temaAgencia.corPrimaria} />
+
         {/* === BOTÕES DE CONTROLE RADAR / LISTA === */}
         {statusOnline && !corridaAceita && (
           <View style={styles.botoesModoContainer}>
             <TouchableOpacity
-              style={[styles.botaoModo, modoVisualizacao === 'lista' && styles.botaoModoAtivo]}
+              style={[styles.botaoModo, modoVisualizacao === 'lista' && styles.botaoModoAtivo, modoVisualizacao === 'lista' && { backgroundColor: temaAgencia.corPrimaria }]}
               onPress={() => setModoVisualizacao('lista')}
             >
               <Text style={[styles.textoBotaoModo, modoVisualizacao === 'lista' && styles.textoBotaoModoAtivo]}>Lista de Corridas</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.botaoModo, modoVisualizacao === 'radar' && styles.botaoModoAtivo]}
+              style={[styles.botaoModo, modoVisualizacao === 'radar' && styles.botaoModoAtivo, modoVisualizacao === 'radar' && { backgroundColor: temaAgencia.corPrimaria }]}
               onPress={() => setModoVisualizacao('radar')}
             >
               <Text style={[styles.textoBotaoModo, modoVisualizacao === 'radar' && styles.textoBotaoModoAtivo]}>Radar</Text>
@@ -480,10 +928,13 @@ export default function Radar() {
                   </View>
                   <View style={styles.enderecosLista}>
                     <Text style={styles.enderecoTextoLista} numberOfLines={2}>🚗 Buscar em: {corrida.busca}</Text>
+                    <Text style={styles.quilometragemTextoLista}>{formatarQuilometragem(corrida.distanciaBusca)}</Text>
+
                     <Text style={styles.enderecoTextoLista} numberOfLines={2}>📍 Levar para: {corrida.destino}</Text>
+                    <Text style={styles.quilometragemTextoLista}>{formatarQuilometragem(corrida.distanciaDestino)}</Text>
                   </View>
                   <TouchableOpacity
-                    style={styles.botaoAceitarLista}
+                    style={[styles.botaoAceitarLista, { backgroundColor: temaAgencia.corPrimaria }]}
                     onPress={() => aceitarCorridaReal(corrida)}
                   >
                     <Text style={styles.textoBotaoAceitarLista}>ACEITAR CORRIDA</Text>
@@ -504,7 +955,7 @@ export default function Radar() {
                 </View>
 
                 <View style={styles.cronometroBarra}>
-                  <View style={[styles.progresso, { width: `${(tempoRestante / 15) * 100}%` }]} />
+                  <View style={[styles.progresso, { width: `${(tempoRestante / 15) * 100}%`, backgroundColor: temaAgencia.corPrimaria }]} />
                 </View>
                 <Text style={styles.textoTempo}>{tempoRestante}s para aceitar</Text>
 
@@ -525,7 +976,7 @@ export default function Radar() {
                   <TouchableOpacity style={styles.btnRecusar} onPress={recusarCorrida}>
                     <Text style={styles.btnTextoVermelho}>RECUSAR</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.btnAceitar} onPress={() => aceitarCorridaReal()}>
+                  <TouchableOpacity style={[styles.btnAceitar, { backgroundColor: temaAgencia.corPrimaria }]} onPress={() => aceitarCorridaReal()}>
                     <Text style={styles.btnTextoBranco}>ACEITAR</Text>
                   </TouchableOpacity>
                 </View>
@@ -538,7 +989,7 @@ export default function Radar() {
                   styles.sonarWave, 
                   { transform: [{ scale: sonarScale }], opacity: sonarOpacity }
                 ]} />
-                <Text style={styles.textoBuscando}>Procurando passageiros...</Text>
+                <Text style={[styles.textoBuscando, { color: "#46f371" }]}>Procurando passageiros...</Text>
               </View>
             )}
           </>
@@ -548,8 +999,8 @@ export default function Radar() {
         {statusOnline && corridaRecebida && corridaAceita && (
           <View style={styles.cartaoEmCorrida}>
             <View style={styles.cabecalhoEmCorrida}>
-              <Text style={styles.tituloEmCorrida}>🚀 EM CORRIDA</Text>
-              <Text style={styles.valorDestaque}>R$ {corridaRecebida.valor.toFixed(2)}</Text>
+              <Text style={[styles.tituloEmCorrida, { color: temaAgencia.corPrimaria }]}>🚀 EM CORRIDA</Text>
+              <Text style={[styles.valorDestaque, { color: temaAgencia.corPrimaria }]}>R$ {corridaRecebida.valor.toFixed(2)}</Text>
             </View>
 
             <View style={styles.infoPassageiroMini}>
@@ -584,21 +1035,23 @@ export default function Radar() {
               </View>
             </View>
 
-            <TouchableOpacity style={styles.btnFinalizarTotal} onPress={finalizarCorridaReal}>
+            <TouchableOpacity style={[styles.btnFinalizarTotal, { backgroundColor: temaAgencia.corPrimaria }]} onPress={finalizarCorridaReal}>
               <Text style={styles.btnTextoBranco}>FINALIZAR CORRIDA</Text>
             </TouchableOpacity>
           </View>
         )}
 
-      </ScrollView>
-    </View>
+        </ScrollView>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  areaSeguraApp: { flex: 1 },
   telaRadar: { flex: 1, backgroundColor: '#ffffff' },
   cabecalhoRadar: { padding: 15, paddingBottom: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#28a745', elevation: 0 },
-  tituloApp: { fontWeight: '900', fontStyle: 'italic', fontSize: 20, color: '#fff' },
+  tituloApp: { flex: 1, fontWeight: '900', fontStyle: 'italic', fontSize: 20, color: '#fff', marginRight: 10 },
   botoesCabecalho: { flexDirection: 'row', alignItems: 'center', gap: 15 },
   statusTopoContainer: { alignItems: 'center', justifyContent: 'center' },
   alavancaInterruptor: { width: 60, height: 30, borderRadius: 30, backgroundColor: '#ffffff', justifyContent: 'center', padding: 4, elevation: 2 },
@@ -606,8 +1059,19 @@ const styles = StyleSheet.create({
   indicadorStatus: { width: 22, height: 22, borderRadius: 11, position: 'absolute' },
   bolinhaVerde: { backgroundColor: '#00e676', right: 4, elevation: 5 },
   bolinhaVermelha: { backgroundColor: '#ff3d00', left: 4, elevation: 5 },
-  botaoMenu: { padding: 5 },
+  botaoMenu: { padding: 5, position: 'relative' },
   iconeMenu: { fontSize: 30, color: '#fff', fontWeight: 'bold' },
+  badgeMenuRecursos: {
+    position: 'absolute',
+    top: 4,
+    right: 2,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#dc3545',
+    borderWidth: 1.5,
+    borderColor: '#fff',
+  },
   containerFlutuante: {
     width: '100%',
     alignItems: 'center',
@@ -632,12 +1096,85 @@ const styles = StyleSheet.create({
   linhaValorVisibilidade: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 15 },
   valorGanhos: { fontSize: 20, fontWeight: '900', color: '#28a745' },
   botaoOlho: { padding: 0 },
+  
+  // --- NOVOS ESTILOS DO MENU ---
   fundoModal: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-start', alignItems: 'flex-end' },
-  caixaMenu: { backgroundColor: '#fff', width: 200, marginTop: 60, marginRight: 15, borderRadius: 10, padding: 15, elevation: 5 },
-  fecharMenu: { alignSelf: 'flex-end', marginBottom: 10 },
-  textoFechar: { fontSize: 18, color: '#d32f2f', fontWeight: 'bold' },
-  itemMenu: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee' },
-  textoItemMenu: { fontSize: 16, color: '#333', fontWeight: 'bold' },
+  caixaMenu: { 
+    backgroundColor: '#ffffff', 
+    width: 230, 
+    marginTop: 101, 
+    marginRight: 15, 
+    borderRadius: 15, 
+    paddingVertical: 20, 
+    paddingHorizontal: 15,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5
+  },
+  tituloMenu: {
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#a0a0a0',
+    letterSpacing: 1.5,
+    marginBottom: 10,
+  },
+  linhaSeparadoraMenu: {
+    height: 1,
+    backgroundColor: '#f0f0f0',
+    marginBottom: 10,
+  },
+  itemMenu: { 
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14, 
+    borderBottomWidth: 1, 
+    borderBottomColor: '#f9f9f9' 
+  },
+  textoItemMenu: { 
+    fontSize: 16, 
+    color: '#333', 
+    fontWeight: '700',
+    marginLeft: 12
+  },
+  notificacaoMenuLinha: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  badgeNotificacaoMenu: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#dc3545',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+    marginLeft: 8,
+  },
+  textoBadgeNotificacaoMenu: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  itemMenuSair: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14, 
+    marginTop: 5,
+  },
+  textoItemMenuSair: {
+    fontSize: 16, 
+    color: '#dc3545', 
+    fontWeight: 'bold',
+    marginLeft: 12
+  },
+  // --- FIM DOS ESTILOS DO MENU ---
+
+  textoFecharBranco: { fontSize: 16, color: '#fff', fontWeight: 'bold' },
   telaCorridasDisponiveis: { flex: 1, backgroundColor: '#fff' },
   cabecalhoModal: { flexDirection: 'row', justifyContent: 'space-between', padding: 20, backgroundColor: '#28a745', alignItems: 'center' },
   tituloModal: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
@@ -762,6 +1299,13 @@ const styles = StyleSheet.create({
     color: '#555',
     fontWeight: '600',
   },
+  quilometragemTextoLista: {
+    fontSize: 13,
+    color: '#007bff',
+    fontWeight: '700',
+    marginBottom: 6,
+    marginLeft: 18,
+  },
   botaoAceitarLista: {
     backgroundColor: '#00c853',
     padding: 14,
@@ -773,4 +1317,64 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 15,
   },
+});
+
+// ==========================================
+// --- NOVOS ESTILOS DO SÍMBOLO MIL-LIN ---
+// ==========================================
+const milLinStyles = StyleSheet.create({
+  telaCarregamento: {
+    flex: 1,
+    backgroundColor: '#1f2937', 
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tituloMilLinBranco: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    color: '#ffffff', 
+    letterSpacing: 2,
+    marginBottom: 20, 
+  },
+  textoCarregando: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#e8f5e9', 
+    letterSpacing: 3, 
+    marginTop: 280, 
+  },
+  containerLogo: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notebookTela: {
+    width: 100,
+    height: 50,
+    backgroundColor: 'white',
+    borderRadius: 8, 
+    marginTop: 0,
+    marginHorizontal: 0,
+    shadowColor: 'rgba(214, 234, 248, 0.699)',
+    shadowOffset: { width: 1, height: 1 },
+    shadowOpacity: 1,
+    shadowRadius: 13,
+    elevation: 5, 
+  },
+  notebookBase: {
+    width: 108,
+    height: 15,
+    backgroundColor: 'white',
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 100,
+    borderBottomRightRadius: 0,
+    borderBottomLeftRadius: 100,
+    marginLeft: 10,
+    marginTop: 1,
+    marginBottom: 15,
+    shadowColor: '#1a1717',
+    shadowOffset: { width: 3, height: 11 },
+    shadowOpacity: 0.8,
+    shadowRadius: 11,
+    elevation: 10, 
+  }
 });

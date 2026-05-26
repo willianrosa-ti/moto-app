@@ -1,0 +1,22 @@
+{
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": [
+      "/_expo/*",
+      "/assets/*",
+      "/favicon.ico",
+      "/manifest.json",
+      "/sw.js",
+      "/icon-192.png",
+      "/icon-512.png",
+      "/maskable-icon-512.png",
+      "/apple-touch-icon.png"
+    ]
+  },
+  "mimeTypes": {
+    ".webmanifest": "application/manifest+json"
+  },
+  "globalHeaders": {
+    "Service-Worker-Allowed": "/"
+  }
+}
