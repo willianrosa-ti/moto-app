@@ -10,6 +10,7 @@ import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import * as Location from 'expo-location'; 
 import { Ionicons } from '@expo/vector-icons'; 
 import AppOverlay from '@/native/AppOverlay';
+import WebPwaNotice from '@/components/WebPwaNotice';
 
 const ficheiroBuzina = require('../../assets/sounds/buzina.mp3');
 
@@ -883,7 +884,8 @@ export default function Radar() {
       </Modal>
 
       <ScrollView contentContainerStyle={styles.conteudoRadar}>
-        
+        <WebPwaNotice corPrimaria={temaAgencia.corPrimaria} />
+
         {/* === BOTÕES DE CONTROLE RADAR / LISTA === */}
         {statusOnline && !corridaAceita && (
           <View style={styles.botoesModoContainer}>
