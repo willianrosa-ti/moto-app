@@ -130,12 +130,83 @@ export default function Radar() {
   };
 
   // --- NOVA FUNÇÃO DE SAIR (LOGOUT) ---
+  const finalizarLogout = async () => {
+    try {
+      const token = await AsyncStorage.getItem('tokenMotorista');
+
+      if (token) {
+        fetch(`${API_BASE}/api/Motorista/alterar-status-online`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(false)
+        }).catch(() => {});
+      }
+
+      await AsyncStorage.multiRemove([
+        'tokenMotorista',
+        'nomeMotorista',
+        'idMotorista',
+        'manterConectadoMotorista',
+        'nomeAgencia',
+        'corAgenciaPrimaria',
+        'corAgenciaSecundaria',
+        'corFonteCabecalhoAgencia',
+        'logoAgencia',
+        'telefoneAgencia',
+      ]);
+
+      setStatusOnline(false);
+      statusOnlineRef.current = false;
+      setCorridaRecebida(null);
+      setCorridaAceita(false);
+      setCorridasDisponiveis([]);
+      setMenuAberto(false);
+
+      if (Platform.OS === 'web') {
+        const janela = (globalThis as any).window;
+        janela?.location?.replace('/');
+        return;
+      }
+
+      navegar.replace('/');
+    } catch (erro) {
+      if (Platform.OS === 'web') {
+        const janela = (globalThis as any).window;
+        janela?.alert?.("Nao foi possivel sair.");
+      } else {
+        Alert.alert("Erro", "Nao foi possivel sair.");
+      }
+    }
+  };
+
   const fazerLogout = async () => {
     if (corridaAceita) {
+      if (Platform.OS === 'web') {
+        const janela = (globalThis as any).window;
+        janela?.alert?.("Finalize a corrida antes de sair do app.");
+        return;
+      }
+
       Alert.alert(
         "Corrida em andamento",
         "Finalize a corrida antes de sair do app."
       );
+      return;
+    }
+
+    if (Platform.OS === 'web') {
+      const janela = (globalThis as any).window;
+      const confirmado = janela?.confirm
+        ? janela.confirm("Tem certeza que deseja desconectar sua conta?")
+        : true;
+
+      if (confirmado) {
+        await finalizarLogout();
+      }
+
       return;
     }
 
@@ -147,28 +218,7 @@ export default function Radar() {
         { 
           text: "Sair", 
           style: "destructive",
-          onPress: async () => {
-            try {
-              // Limpa a memória do celular
-              await AsyncStorage.removeItem('tokenMotorista');
-              await AsyncStorage.removeItem('nomeMotorista');
-              await AsyncStorage.removeItem('idMotorista');
-              await AsyncStorage.removeItem('nomeAgencia');
-              await AsyncStorage.removeItem('corAgenciaPrimaria');
-              await AsyncStorage.removeItem('corAgenciaSecundaria');
-              await AsyncStorage.removeItem('corFonteCabecalhoAgencia');
-              await AsyncStorage.removeItem('logoAgencia');
-              await AsyncStorage.removeItem('telefoneAgencia');
-              
-              setStatusOnline(false); // Desliga o radar por segurança
-              setMenuAberto(false);
-              
-              // Substitua '/' pela rota do seu arquivo de Login, caso seja diferente
-              navegar.replace('/'); 
-            } catch (erro) {
-              Alert.alert("Erro", "Não foi possível sair.");
-            }
-          }
+          onPress: finalizarLogout
         }
       ]
     );
