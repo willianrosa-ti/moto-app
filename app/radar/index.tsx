@@ -65,6 +65,8 @@ export default function Radar() {
   const [tempoRestante, setTempoRestante] = useState(15);
   const [localizacaoMotorista, setLocalizacaoMotorista] = useState<Location.LocationObject | null>(null);
   const [menuAberto, setMenuAberto] = useState(false);
+  const [confirmarLogoutWeb, setConfirmarLogoutWeb] = useState(false);
+  const [mensagemAvisoWeb, setMensagemAvisoWeb] = useState<string | null>(null);
   const [qtdNotificacoesSuporte, setQtdNotificacoesSuporte] = useState(0);
   const [temaAgencia, setTemaAgencia] = useState<TemaAgencia>(TEMA_AGENCIA_PADRAO);
   
@@ -174,8 +176,7 @@ export default function Radar() {
       navegar.replace('/');
     } catch (erro) {
       if (Platform.OS === 'web') {
-        const janela = (globalThis as any).window;
-        janela?.alert?.("Nao foi possivel sair.");
+        setMensagemAvisoWeb("Nao foi possivel sair.");
       } else {
         Alert.alert("Erro", "Nao foi possivel sair.");
       }
@@ -185,8 +186,8 @@ export default function Radar() {
   const fazerLogout = async () => {
     if (corridaAceita) {
       if (Platform.OS === 'web') {
-        const janela = (globalThis as any).window;
-        janela?.alert?.("Finalize a corrida antes de sair do app.");
+        setMenuAberto(false);
+        setMensagemAvisoWeb("Finalize a corrida antes de sair do app.");
         return;
       }
 
@@ -198,15 +199,8 @@ export default function Radar() {
     }
 
     if (Platform.OS === 'web') {
-      const janela = (globalThis as any).window;
-      const confirmado = janela?.confirm
-        ? janela.confirm("Tem certeza que deseja desconectar sua conta?")
-        : true;
-
-      if (confirmado) {
-        await finalizarLogout();
-      }
-
+      setMenuAberto(false);
+      setConfirmarLogoutWeb(true);
       return;
     }
 
@@ -933,6 +927,66 @@ export default function Radar() {
         </TouchableWithoutFeedback>
       </Modal>
 
+      {Platform.OS === 'web' && (
+        <Modal
+          visible={confirmarLogoutWeb}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setConfirmarLogoutWeb(false)}
+        >
+          <View style={styles.fundoConfirmacaoWeb}>
+            <View style={styles.caixaConfirmacaoWeb}>
+              <Text style={styles.tituloConfirmacaoWeb}>Sair do App</Text>
+              <Text style={styles.textoConfirmacaoWeb}>
+                Tem certeza que deseja desconectar sua conta?
+              </Text>
+
+              <View style={styles.botoesConfirmacaoWeb}>
+                <TouchableOpacity
+                  style={styles.botaoCancelarConfirmacaoWeb}
+                  onPress={() => setConfirmarLogoutWeb(false)}
+                >
+                  <Text style={styles.textoCancelarConfirmacaoWeb}>Cancelar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.botaoSairConfirmacaoWeb}
+                  onPress={async () => {
+                    setConfirmarLogoutWeb(false);
+                    await finalizarLogout();
+                  }}
+                >
+                  <Text style={styles.textoSairConfirmacaoWeb}>Sair</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {Platform.OS === 'web' && (
+        <Modal
+          visible={!!mensagemAvisoWeb}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setMensagemAvisoWeb(null)}
+        >
+          <View style={styles.fundoConfirmacaoWeb}>
+            <View style={styles.caixaConfirmacaoWeb}>
+              <Text style={styles.tituloConfirmacaoWeb}>Aviso</Text>
+              <Text style={styles.textoConfirmacaoWeb}>{mensagemAvisoWeb}</Text>
+
+              <TouchableOpacity
+                style={styles.botaoOkConfirmacaoWeb}
+                onPress={() => setMensagemAvisoWeb(null)}
+              >
+                <Text style={styles.textoSairConfirmacaoWeb}>OK</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      )}
+
       <ScrollView contentContainerStyle={styles.conteudoRadar}>
         <WebPwaNotice corPrimaria={temaAgencia.corPrimaria} />
 
@@ -1221,6 +1275,78 @@ const styles = StyleSheet.create({
     color: '#dc3545', 
     fontWeight: 'bold',
     marginLeft: 12
+  },
+  fundoConfirmacaoWeb: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  caixaConfirmacaoWeb: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 12,
+  },
+  tituloConfirmacaoWeb: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#1f2937',
+    marginBottom: 10,
+  },
+  textoConfirmacaoWeb: {
+    fontSize: 15,
+    color: '#374151',
+    lineHeight: 22,
+    marginBottom: 18,
+  },
+  botoesConfirmacaoWeb: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  botaoCancelarConfirmacaoWeb: {
+    minWidth: 96,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    alignItems: 'center',
+  },
+  botaoSairConfirmacaoWeb: {
+    minWidth: 96,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#dc3545',
+    alignItems: 'center',
+  },
+  botaoOkConfirmacaoWeb: {
+    alignSelf: 'flex-end',
+    minWidth: 96,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#dc3545',
+    alignItems: 'center',
+  },
+  textoCancelarConfirmacaoWeb: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#374151',
+  },
+  textoSairConfirmacaoWeb: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#ffffff',
   },
   // --- FIM DOS ESTILOS DO MENU ---
 
