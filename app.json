@@ -21,7 +21,7 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.millin.motorista",
-      "versionCode": 5
+      "versionCode": 6
     },
     "web": {
       "output": "static",
@@ -53,6 +53,12 @@
       "eas": {
         "projectId": "85bac106-41b5-48e0-8a33-8c7f7d9d7292"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/85bac106-41b5-48e0-8a33-8c7f7d9d7292"
     }
   }
 }

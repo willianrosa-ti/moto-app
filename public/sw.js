@@ -17,7 +17,12 @@ self.addEventListener('push', function (event) {
     }
   }
 
+  var dados = payload.data || {};
+  var tipo = payload.tipo || dados.tipo || null;
+  var urlPadrao = tipo === 'suporte_resposta' ? '/radar/notificacoes' : '/radar';
+  var destino = payload.url || dados.url || urlPadrao;
   var title = payload.title || 'Nova chamada MIL-LIN';
+
   var options = {
     body: payload.body || 'Abra o radar para ver a corrida disponivel.',
     icon: payload.icon || '/icon-192.png',
@@ -25,10 +30,12 @@ self.addEventListener('push', function (event) {
     tag: payload.tag || 'mil-lin-nova-corrida',
     renotify: true,
     requireInteraction: true,
-    data: {
-      url: payload.url || '/radar',
-      corridaId: payload.corridaId || null
-    }
+    data: Object.assign({}, dados, {
+      url: destino,
+      tipo: tipo,
+      corridaId: payload.corridaId || dados.corridaId || null,
+      suporteId: payload.suporteId || dados.suporteId || null
+    })
   };
 
   event.waitUntil(self.registration.showNotification(title, options));

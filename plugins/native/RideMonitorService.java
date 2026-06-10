@@ -5,14 +5,20 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
+import android.content.pm.PackageManager;
 import android.content.res.AssetFileDescriptor;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
 import android.media.AudioAttributes;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
+import android.os.Bundle;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
@@ -27,6 +33,7 @@ import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -50,14 +57,21 @@ public class RideMonitorService extends Service {
     private static final String PREF_API_BASE = "apiBase";
     private static final int NOTIFICATION_ID = 7761;
     private static final long INTERVALO_CONSULTA_SEGUNDOS = 3;
+    private static final long INTERVALO_LOCALIZACAO_MS = 5000;
+    private static final long INTERVALO_REENVIO_LOCALIZACAO_MS = 10000;
+    private static final float DISTANCIA_LOCALIZACAO_METROS = 10f;
     private static final Set<MediaPlayer> buzinasAtivas = Collections.synchronizedSet(new HashSet<>());
     private static volatile boolean appEmPrimeiroPlano = false;
 
     private final Set<String> idsConhecidos = Collections.synchronizedSet(new HashSet<>());
     private ScheduledExecutorService executor;
+    private LocationManager locationManager;
+    private LocationListener locationListener;
     private PowerManager.WakeLock wakeLock;
     private volatile String token;
     private volatile String apiBase = API_BASE_PADRAO;
+    private volatile Location ultimaLocalizacao;
+    private volatile long ultimoEnvioLocalizacaoMs = 0L;
 
     public static void setAppInForeground(boolean appEmPrimeiroPlanoAtual) {
         appEmPrimeiroPlano = appEmPrimeiroPlanoAtual;
@@ -86,12 +100,14 @@ public class RideMonitorService extends Service {
         iniciarForeground();
         iniciarWakeLock();
         iniciarLoop();
+        iniciarMonitoramentoLocalizacao();
 
         return START_STICKY;
     }
 
     @Override
     public void onDestroy() {
+        pararMonitoramentoLocalizacao();
         pararLoop();
         liberarWakeLock();
         super.onDestroy();
@@ -133,7 +149,16 @@ public class RideMonitorService extends Service {
         Notification notification = criarNotificacao();
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+            int tiposForeground = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC;
+            if (temPermissaoLocalizacao()) {
+                tiposForeground |= ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
+            }
+
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                tiposForeground
+            );
         } else {
             startForeground(NOTIFICATION_ID, notification);
         }
@@ -173,6 +198,8 @@ public class RideMonitorService extends Service {
                 tocarAlertaCorrida();
             }
         } catch (Exception ignored) {
+        } finally {
+            reenviarUltimaLocalizacaoSeNecessario();
         }
     }
 
@@ -210,6 +237,191 @@ public class RideMonitorService extends Service {
         }
 
         return ids;
+    }
+
+    private void iniciarMonitoramentoLocalizacao() {
+        if (locationManager != null && locationListener != null) return;
+        if (!temPermissaoLocalizacao()) return;
+
+        locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+        if (locationManager == null) return;
+
+        locationListener = new LocationListener() {
+            @Override
+            public void onLocationChanged(Location location) {
+                if (location == null) return;
+
+                ultimaLocalizacao = location;
+                agendarEnvioLocalizacao(location, false);
+            }
+
+            @Override
+            public void onProviderEnabled(String provider) {
+            }
+
+            @Override
+            public void onProviderDisabled(String provider) {
+            }
+
+            @Override
+            public void onStatusChanged(String provider, int status, Bundle extras) {
+            }
+        };
+
+        registrarProviderLocalizacao(LocationManager.GPS_PROVIDER);
+        registrarProviderLocalizacao(LocationManager.NETWORK_PROVIDER);
+
+        Location ultimaConhecida = obterMelhorUltimaLocalizacao();
+        if (ultimaConhecida != null) {
+            ultimaLocalizacao = ultimaConhecida;
+            agendarEnvioLocalizacao(ultimaConhecida, true);
+        }
+    }
+
+    private void registrarProviderLocalizacao(String provider) {
+        try {
+            if (locationManager != null &&
+                locationListener != null &&
+                locationManager.isProviderEnabled(provider)) {
+                locationManager.requestLocationUpdates(
+                    provider,
+                    INTERVALO_LOCALIZACAO_MS,
+                    DISTANCIA_LOCALIZACAO_METROS,
+                    locationListener
+                );
+            }
+        } catch (SecurityException ignored) {
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void pararMonitoramentoLocalizacao() {
+        try {
+            if (locationManager != null && locationListener != null) {
+                locationManager.removeUpdates(locationListener);
+            }
+        } catch (SecurityException ignored) {
+        } catch (Exception ignored) {
+        } finally {
+            locationListener = null;
+            locationManager = null;
+            ultimaLocalizacao = null;
+            ultimoEnvioLocalizacaoMs = 0L;
+        }
+    }
+
+    private boolean temPermissaoLocalizacao() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
+
+        return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private Location obterMelhorUltimaLocalizacao() {
+        if (!temPermissaoLocalizacao() || locationManager == null) return null;
+
+        Location melhor = null;
+        melhor = escolherMelhorLocalizacao(melhor, obterUltimaLocalizacao(LocationManager.GPS_PROVIDER));
+        melhor = escolherMelhorLocalizacao(melhor, obterUltimaLocalizacao(LocationManager.NETWORK_PROVIDER));
+
+        return melhor;
+    }
+
+    private Location obterUltimaLocalizacao(String provider) {
+        try {
+            if (locationManager != null && locationManager.isProviderEnabled(provider)) {
+                return locationManager.getLastKnownLocation(provider);
+            }
+        } catch (SecurityException ignored) {
+        } catch (Exception ignored) {
+        }
+
+        return null;
+    }
+
+    private Location escolherMelhorLocalizacao(Location atual, Location candidata) {
+        if (candidata == null) return atual;
+        if (atual == null) return candidata;
+
+        long diferencaTempo = candidata.getTime() - atual.getTime();
+        if (diferencaTempo > 120000) return candidata;
+        if (diferencaTempo < -120000) return atual;
+
+        if (candidata.hasAccuracy() && atual.hasAccuracy()) {
+            return candidata.getAccuracy() <= atual.getAccuracy() ? candidata : atual;
+        }
+
+        return candidata;
+    }
+
+    private void agendarEnvioLocalizacao(Location location, boolean forcar) {
+        if (executor == null || executor.isShutdown()) return;
+
+        executor.execute(() -> enviarLocalizacaoComSeguranca(location, forcar));
+    }
+
+    private void reenviarUltimaLocalizacaoSeNecessario() {
+        Location localizacao = ultimaLocalizacao;
+
+        if (localizacao == null) {
+            localizacao = obterMelhorUltimaLocalizacao();
+            if (localizacao != null) {
+                ultimaLocalizacao = localizacao;
+            }
+        }
+
+        enviarLocalizacaoComSeguranca(localizacao, false);
+    }
+
+    private void enviarLocalizacaoComSeguranca(Location location, boolean forcar) {
+        if (location == null || appEmPrimeiroPlano) return;
+
+        String tokenAtual = token;
+        if (tokenAtual == null || tokenAtual.trim().isEmpty()) return;
+
+        long agora = System.currentTimeMillis();
+        if (!forcar && agora - ultimoEnvioLocalizacaoMs < INTERVALO_REENVIO_LOCALIZACAO_MS) return;
+
+        ultimoEnvioLocalizacaoMs = agora;
+
+        HttpURLConnection conexao = null;
+
+        try {
+            URL url = new URL(normalizarApiBase(apiBase) + "/api/Motorista/atualizar-localizacao");
+            JSONObject corpo = new JSONObject();
+            corpo.put("latitude", location.getLatitude());
+            corpo.put("longitude", location.getLongitude());
+
+            byte[] payload = corpo.toString().getBytes(StandardCharsets.UTF_8);
+
+            conexao = (HttpURLConnection) url.openConnection();
+            conexao.setRequestMethod("POST");
+            conexao.setConnectTimeout(10000);
+            conexao.setReadTimeout(10000);
+            conexao.setDoOutput(true);
+            conexao.setFixedLengthStreamingMode(payload.length);
+            conexao.setRequestProperty("Authorization", "Bearer " + tokenAtual);
+            conexao.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            conexao.setRequestProperty("Accept", "application/json");
+
+            try (OutputStream outputStream = conexao.getOutputStream()) {
+                outputStream.write(payload);
+            }
+
+            int status = conexao.getResponseCode();
+            InputStream resposta = status >= 200 && status < 400
+                ? conexao.getInputStream()
+                : conexao.getErrorStream();
+
+            if (resposta != null) {
+                resposta.close();
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (conexao != null) {
+                conexao.disconnect();
+            }
+        }
     }
 
     private String lerResposta(InputStream inputStream) throws Exception {
@@ -321,6 +533,7 @@ public class RideMonitorService extends Service {
     }
 
     private void pararMonitoramento() {
+        pararMonitoramentoLocalizacao();
         pararLoop();
         liberarWakeLock();
         idsConhecidos.clear();
@@ -374,7 +587,7 @@ public class RideMonitorService extends Service {
 
         return builder
             .setContentTitle("MIL-LIN motorista online")
-            .setContentText("Monitorando corridas em segundo plano.")
+            .setContentText("Monitorando corridas e GPS em segundo plano.")
             .setSmallIcon(icone)
             .setContentIntent(pendingIntent)
             .setOngoing(true)

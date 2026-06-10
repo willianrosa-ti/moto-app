@@ -5,8 +5,12 @@ const { withAndroidManifest, withDangerousMod } = require('@expo/config-plugins'
 const OVERLAY_PACKAGE = 'com.millin.motorista.overlay';
 const PERMISSOES_ANDROID = [
   'android.permission.SYSTEM_ALERT_WINDOW',
+  'android.permission.ACCESS_COARSE_LOCATION',
+  'android.permission.ACCESS_FINE_LOCATION',
+  'android.permission.ACCESS_BACKGROUND_LOCATION',
   'android.permission.FOREGROUND_SERVICE',
   'android.permission.FOREGROUND_SERVICE_DATA_SYNC',
+  'android.permission.FOREGROUND_SERVICE_LOCATION',
   'android.permission.WAKE_LOCK',
 ];
 
@@ -37,7 +41,7 @@ function adicionarServicoMonitor(manifest) {
   const atributos = {
     'android:name': nomeServico,
     'android:exported': 'false',
-    'android:foregroundServiceType': 'dataSync',
+    'android:foregroundServiceType': 'dataSync|location',
   };
 
   if (existente) {

@@ -1,16 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, Animated, Easing, ScrollView, Modal, TouchableWithoutFeedback, StatusBar, Platform, AppState } from 'react-native';
-import type { AppStateStatus } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useKeepAwake } from 'expo-keep-awake';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
-import * as signalR from '@microsoft/signalr';
-import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av'; 
-import * as Location from 'expo-location'; 
-import { Ionicons } from '@expo/vector-icons'; 
-import AppOverlay from '@/native/AppOverlay';
 import WebPwaNotice from '@/components/WebPwaNotice';
+import AppOverlay from '@/native/AppOverlay';
+import { Ionicons } from '@expo/vector-icons';
+import * as signalR from '@microsoft/signalr';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
+import { useKeepAwake } from 'expo-keep-awake';
+import * as Location from 'expo-location';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
+import type { AppStateStatus } from 'react-native';
+import { Alert, Animated, AppState, Easing, Linking, Modal, Platform, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const ficheiroBuzina = require('../../assets/sounds/buzina.mp3');
 
@@ -21,6 +21,7 @@ const COR_PRIMARIA_PADRAO = '#28a745';
 const COR_SECUNDARIA_PADRAO = '#00c853';
 const COR_FONTE_CABECALHO_PADRAO = '#ffffff';
 const TELEFONE_AGENCIA_PADRAO = '+5500000000000';
+const CHAVE_AVISO_GPS_BACKGROUND = 'avisoGpsBackgroundMotorista';
 
 type TemaAgencia = {
   nome: string;
@@ -36,6 +37,37 @@ const TEMA_AGENCIA_PADRAO: TemaAgencia = {
   corSecundaria: COR_SECUNDARIA_PADRAO,
   corFonteCabecalho: COR_FONTE_CABECALHO_PADRAO,
   telefone: TELEFONE_AGENCIA_PADRAO,
+};
+
+const solicitarPermissoesGpsMotorista = async (pedirSegundoPlano = false) => {
+  const permissaoFrente = await Location.requestForegroundPermissionsAsync();
+
+  if (permissaoFrente.status !== 'granted') {
+    Alert.alert('Atencao', 'Precisamos do GPS para manter o monitoramento da agencia.');
+    return false;
+  }
+
+  if (Platform.OS === 'android' && pedirSegundoPlano) {
+    const permissaoAtual = await Location.getBackgroundPermissionsAsync();
+
+    if (permissaoAtual.status !== 'granted') {
+      const permissaoSegundoPlano = await Location.requestBackgroundPermissionsAsync();
+
+      if (permissaoSegundoPlano.status !== 'granted') {
+        const avisoJaMostrado = await AsyncStorage.getItem(CHAVE_AVISO_GPS_BACKGROUND);
+
+        if (!avisoJaMostrado) {
+          await AsyncStorage.setItem(CHAVE_AVISO_GPS_BACKGROUND, 'true');
+          Alert.alert(
+            'GPS em segundo plano',
+            'Para o painel acompanhar sua moto com o app minimizado, permita a localizacao o tempo todo nas configuracoes do Android.'
+          );
+        }
+      }
+    }
+  }
+
+  return true;
 };
 
 const formatarQuilometragem = (valor: any) => {
@@ -417,9 +449,8 @@ export default function Radar() {
     let inscricaoLocalizacao: Location.LocationSubscription;
 
     (async () => {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Atenção', 'Precisamos do GPS!');
+      const permissaoGps = await solicitarPermissoesGpsMotorista(false);
+      if (!permissaoGps) {
         return;
       }
 
@@ -696,6 +727,11 @@ export default function Radar() {
         "Finalize a corrida antes de desligar o radar."
       );
       return;
+    }
+
+    if (novoStatus) {
+      const permissaoGps = await solicitarPermissoesGpsMotorista(true);
+      if (!permissaoGps) return;
     }
 
     try {
