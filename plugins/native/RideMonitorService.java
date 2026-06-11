@@ -52,10 +52,12 @@ public class RideMonitorService extends Service {
 
     private static final String API_BASE_PADRAO = "https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net";
     private static final String CHANNEL_ID = "millin_ride_monitor";
+    private static final String ALERT_CHANNEL_ID = "millin_ride_alerts";
     private static final String PREFS_NAME = "millin_ride_monitor";
     private static final String PREF_TOKEN = "token";
     private static final String PREF_API_BASE = "apiBase";
     private static final int NOTIFICATION_ID = 7761;
+    private static final int ALERT_NOTIFICATION_ID = 7762;
     private static final long INTERVALO_CONSULTA_SEGUNDOS = 3;
     private static final long INTERVALO_LOCALIZACAO_MS = 5000;
     private static final long INTERVALO_REENVIO_LOCALIZACAO_MS = 10000;
@@ -72,6 +74,7 @@ public class RideMonitorService extends Service {
     private volatile String apiBase = API_BASE_PADRAO;
     private volatile Location ultimaLocalizacao;
     private volatile long ultimoEnvioLocalizacaoMs = 0L;
+    private volatile String corridaAtivaConhecidaId;
 
     public static void setAppInForeground(boolean appEmPrimeiroPlanoAtual) {
         appEmPrimeiroPlano = appEmPrimeiroPlanoAtual;
@@ -178,6 +181,11 @@ public class RideMonitorService extends Service {
 
     private void consultarCorridasComSeguranca() {
         try {
+            consultarCorridaAtivaComSeguranca();
+        } catch (Exception ignored) {
+        }
+
+        try {
             Set<String> idsAtuais = buscarIdsCorridasPendentes();
             if (idsAtuais == null) return;
 
@@ -200,6 +208,31 @@ public class RideMonitorService extends Service {
         } catch (Exception ignored) {
         } finally {
             reenviarUltimaLocalizacaoSeNecessario();
+        }
+    }
+
+    private void consultarCorridaAtivaComSeguranca() throws Exception {
+        JSONObject corridaAtiva = buscarCorridaAtiva();
+
+        if (corridaAtiva == null) {
+            corridaAtivaConhecidaId = null;
+            return;
+        }
+
+        Object idObjeto = corridaAtiva.opt("id");
+        if (idObjeto == null || JSONObject.NULL.equals(idObjeto)) return;
+
+        String idCorrida = String.valueOf(idObjeto);
+        boolean corridaNova = !idCorrida.equals(corridaAtivaConhecidaId);
+        corridaAtivaConhecidaId = idCorrida;
+
+        if (!corridaNova || !corridaAtiva.optBoolean("direcionada", false)) return;
+
+        tocarAlertaCorrida();
+        notificarCorridaDirecionada();
+
+        if (!appEmPrimeiroPlano) {
+            abrirAppParaCorridaDirecionada();
         }
     }
 
@@ -237,6 +270,38 @@ public class RideMonitorService extends Service {
         }
 
         return ids;
+    }
+
+    private JSONObject buscarCorridaAtiva() throws Exception {
+        String tokenAtual = token;
+        if (tokenAtual == null || tokenAtual.trim().isEmpty()) return null;
+
+        HttpURLConnection conexao = null;
+
+        try {
+            URL url = new URL(normalizarApiBase(apiBase) + "/api/Corrida/ativa");
+            conexao = (HttpURLConnection) url.openConnection();
+            conexao.setRequestMethod("GET");
+            conexao.setConnectTimeout(10000);
+            conexao.setReadTimeout(10000);
+            conexao.setRequestProperty("Authorization", "Bearer " + tokenAtual);
+            conexao.setRequestProperty("Accept", "application/json");
+
+            int status = conexao.getResponseCode();
+            if (status == 204) return null;
+            if (status < 200 || status >= 300) {
+                throw new IllegalStateException("Falha ao consultar corrida ativa: " + status);
+            }
+
+            String resposta = lerResposta(conexao.getInputStream());
+            if (resposta == null || resposta.trim().isEmpty()) return null;
+
+            return new JSONObject(resposta);
+        } finally {
+            if (conexao != null) {
+                conexao.disconnect();
+            }
+        }
     }
 
     private void iniciarMonitoramentoLocalizacao() {
@@ -537,6 +602,7 @@ public class RideMonitorService extends Service {
         pararLoop();
         liberarWakeLock();
         idsConhecidos.clear();
+        corridaAtivaConhecidaId = null;
         token = null;
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().clear().apply();
         stopForeground(true);
@@ -560,25 +626,24 @@ public class RideMonitorService extends Service {
         );
         canal.setDescription("Mantem o alerta de corridas funcionando em segundo plano.");
 
+        NotificationChannel canalAlerta = new NotificationChannel(
+            ALERT_CHANNEL_ID,
+            "MIL-LIN corridas direcionadas",
+            NotificationManager.IMPORTANCE_HIGH
+        );
+        canalAlerta.setDescription("Alertas fortes para corridas direcionadas pela agencia.");
+        canalAlerta.enableVibration(true);
+        canalAlerta.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+
         NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager != null) {
             manager.createNotificationChannel(canal);
+            manager.createNotificationChannel(canalAlerta);
         }
     }
 
     private Notification criarNotificacao() {
-        Intent abrirApp = getPackageManager().getLaunchIntentForPackage(getPackageName());
-        if (abrirApp == null) {
-            abrirApp = new Intent();
-        }
-        abrirApp.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
-
-        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            flags |= PendingIntent.FLAG_IMMUTABLE;
-        }
-
-        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, abrirApp, flags);
+        PendingIntent pendingIntent = criarPendingIntentAbrirApp(0);
         int icone = getApplicationInfo().icon != 0 ? getApplicationInfo().icon : android.R.drawable.ic_dialog_info;
 
         Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
@@ -593,6 +658,70 @@ public class RideMonitorService extends Service {
             .setOngoing(true)
             .setCategory(Notification.CATEGORY_SERVICE)
             .build();
+    }
+
+    private Intent criarIntentAbrirApp() {
+        Intent abrirApp = getPackageManager().getLaunchIntentForPackage(getPackageName());
+        if (abrirApp == null) {
+            abrirApp = new Intent();
+        }
+
+        abrirApp.addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK |
+            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT |
+            Intent.FLAG_ACTIVITY_SINGLE_TOP
+        );
+        abrirApp.putExtra("corridaDirecionada", true);
+
+        return abrirApp;
+    }
+
+    private PendingIntent criarPendingIntentAbrirApp(int requestCode) {
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            flags |= PendingIntent.FLAG_IMMUTABLE;
+        }
+
+        return PendingIntent.getActivity(this, requestCode, criarIntentAbrirApp(), flags);
+    }
+
+    private void abrirAppParaCorridaDirecionada() {
+        try {
+            startActivity(criarIntentAbrirApp());
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void notificarCorridaDirecionada() {
+        criarCanalNotificacao();
+
+        PendingIntent pendingIntent = criarPendingIntentAbrirApp(1);
+        int icone = getApplicationInfo().icon != 0 ? getApplicationInfo().icon : android.R.drawable.ic_dialog_info;
+
+        Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+            ? new Notification.Builder(this, ALERT_CHANNEL_ID)
+            : new Notification.Builder(this);
+
+        builder
+            .setContentTitle("Corrida direcionada para voce")
+            .setContentText("A corrida ira iniciar em 5 segundos.")
+            .setSmallIcon(icone)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setCategory(Notification.CATEGORY_ALARM)
+            .setPriority(Notification.PRIORITY_MAX)
+            .setDefaults(Notification.DEFAULT_ALL)
+            .setFullScreenIntent(pendingIntent, true)
+            .setVibrate(new long[] {0, 450, 250, 450});
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            builder.setVisibility(Notification.VISIBILITY_PUBLIC);
+        }
+
+        NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager != null) {
+            manager.notify(ALERT_NOTIFICATION_ID, builder.build());
+        }
     }
 
     private String normalizarApiBase(String valor) {

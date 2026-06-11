@@ -9,7 +9,7 @@ import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import type { AppStateStatus } from 'react-native';
-import { Alert, Animated, AppState, Easing, Linking, Modal, Platform, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
+import { Alert, Animated, AppState, Easing, Linking, Modal, PermissionsAndroid, Platform, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const ficheiroBuzina = require('../../assets/sounds/buzina.mp3');
@@ -70,6 +70,17 @@ const solicitarPermissoesGpsMotorista = async (pedirSegundoPlano = false) => {
   return true;
 };
 
+const solicitarPermissaoNotificacaoAndroid = async () => {
+  if (Platform.OS !== 'android' || Number(Platform.Version) < 33) return true;
+
+  const permissao = PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS;
+  const jaPermitido = await PermissionsAndroid.check(permissao);
+  if (jaPermitido) return true;
+
+  const resultado = await PermissionsAndroid.request(permissao);
+  return resultado === PermissionsAndroid.RESULTS.GRANTED;
+};
+
 const formatarQuilometragem = (valor: any) => {
   const numero = Number(valor || 0);
   return `${numero.toFixed(1).replace('.', ',')} km de distância`;
@@ -101,6 +112,7 @@ export default function Radar() {
   const [mensagemAvisoWeb, setMensagemAvisoWeb] = useState<string | null>(null);
   const [qtdNotificacoesSuporte, setQtdNotificacoesSuporte] = useState(0);
   const [temaAgencia, setTemaAgencia] = useState<TemaAgencia>(TEMA_AGENCIA_PADRAO);
+  const [avisoCorridaDirecionada, setAvisoCorridaDirecionada] = useState({ ativo: false, segundos: 5 });
   
   const [valorDiario, setValorDiario] = useState<number>(0); 
   const [mostrarValor, setMostrarValor] = useState(false); 
@@ -276,10 +288,12 @@ export default function Radar() {
   };
 
   // --- NOVA FUNÇÃO: VERIFICAR E RECUPERAR CORRIDA ATIVA ---
-  const verificarCorridaAtiva = async () => {
+  const verificarCorridaAtiva = async (
+    opcoes: { mostrarAvisoDirecionada?: boolean; segundos?: number } = {}
+  ) => {
     try {
       const token = await AsyncStorage.getItem('tokenMotorista');
-      if (!token) return;
+      if (!token) return false;
 
       const resposta = await fetch(`${API_BASE}/api/Corrida/ativa`, {
         method: 'GET',
@@ -292,14 +306,29 @@ export default function Radar() {
       if (resposta.status === 200) {
         const corrida = await resposta.json();
         if (corrida) {
+          const corridaDirecionada = corrida?.direcionada === true || corrida?.motoristaExclusivoId;
           setCorridaRecebida(corrida); // Puxa os dados para a tela
           setCorridaAceita(true);      // Força o app a abrir a tela de "EM CORRIDA"
           setStatusOnline(true);       // Liga o radar para o GPS continuar rastreando
+          statusOnlineRef.current = true;
+          setCorridasDisponiveis([]);
+
+          if (opcoes.mostrarAvisoDirecionada && corridaDirecionada) {
+            setModoVisualizacao('radar');
+            setAvisoCorridaDirecionada({
+              ativo: true,
+              segundos: Math.max(1, opcoes.segundos || 5)
+            });
+          }
+
+          return true;
         }
       }
     } catch (erro) {
       console.log("Erro ao recuperar corrida ativa:", erro);
     }
+
+    return false;
   };
 
   const buscarNotificacoesSuporteMotorista = async () => {
@@ -331,7 +360,15 @@ export default function Radar() {
   useEffect(() => {
     carregarTemaAgenciaSalvo();
     buscarGanhosDoDia();
-    verificarCorridaAtiva(); // <-- Adicionamos a checagem logo ao abrir o App
+    const parametrosWeb = Platform.OS === 'web'
+      ? new URLSearchParams((globalThis as any)?.window?.location?.search || '')
+      : null;
+    const veioDePushDirecionada = parametrosWeb?.get('direcionada') === '1';
+
+    verificarCorridaAtiva({
+      mostrarAvisoDirecionada: Platform.OS === 'android' || veioDePushDirecionada,
+      segundos: 5
+    });
     buscarNotificacoesSuporteMotorista();
     Audio.setAudioModeAsync({
       allowsRecordingIOS: false,
@@ -356,6 +393,13 @@ export default function Radar() {
     const inscricao = AppState.addEventListener('change', (estado) => {
       estadoAppRef.current = estado;
       AppOverlay.setRideMonitorForeground(estado === 'active').catch(() => {});
+
+      if (estado === 'active' && !corridaRecebidaRef.current) {
+        verificarCorridaAtiva({
+          mostrarAvisoDirecionada: Platform.OS === 'android',
+          segundos: 5
+        });
+      }
     });
 
     AppOverlay.setRideMonitorForeground(AppState.currentState === 'active').catch(() => {});
@@ -379,6 +423,7 @@ export default function Radar() {
         if (cancelado) return;
 
         if (token) {
+          await solicitarPermissaoNotificacaoAndroid();
           await AppOverlay.setRideMonitorForeground(estadoAppRef.current === 'active');
           await AppOverlay.startRideMonitor(token, API_BASE);
         } else {
@@ -525,13 +570,46 @@ export default function Radar() {
     }
   };
 
+  const prepararCorridaAtribuida = async (segundos = 5) => {
+    const encontrouCorrida = await verificarCorridaAtiva({
+      mostrarAvisoDirecionada: true,
+      segundos
+    });
+
+    if (encontrouCorrida) {
+      await tocarBuzina();
+
+      if (Platform.OS === 'android') {
+        AppOverlay.showOverlay('Corrida').catch(() => {});
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!avisoCorridaDirecionada.ativo) return undefined;
+
+    const temporizador = setTimeout(() => {
+      setAvisoCorridaDirecionada((estadoAtual) => {
+        if (!estadoAtual.ativo) return estadoAtual;
+
+        if (estadoAtual.segundos <= 1) {
+          return { ativo: false, segundos: 5 };
+        }
+
+        return { ...estadoAtual, segundos: estadoAtual.segundos - 1 };
+      });
+    }, 1000);
+
+    return () => clearTimeout(temporizador);
+  }, [avisoCorridaDirecionada.ativo, avisoCorridaDirecionada.segundos]);
+
   // Som para o modo RADAR
   useEffect(() => {
-    if (corridaRecebida && !corridaAceita && modoVisualizacao === 'radar') {
+    if (corridaRecebida && !corridaAceita && !avisoCorridaDirecionada.ativo && modoVisualizacao === 'radar') {
       setTempoRestante(15); 
       tocarBuzina();
     }
-  }, [corridaRecebida, modoVisualizacao]);
+  }, [corridaRecebida, modoVisualizacao, avisoCorridaDirecionada.ativo]);
 
   useEffect(() => {
     corridaAceitaRef.current = corridaAceita;
@@ -577,6 +655,11 @@ export default function Radar() {
     });
 
     // NOVO: Gatilho para limpar a tela na mesma hora que alguém aceitar
+    conexao.on("CorridaAtribuida", (payload: any) => {
+      const segundos = Number(payload?.iniciarEmSegundos || 5);
+      prepararCorridaAtribuida(Number.isFinite(segundos) ? segundos : 5);
+    });
+
     conexao.on("AtualizarCorridas", () => {
       setSinalNovaCorrida(gatilho => gatilho + 1);
     });
@@ -1027,7 +1110,7 @@ export default function Radar() {
         <WebPwaNotice corPrimaria={temaAgencia.corPrimaria} />
 
         {/* === BOTÕES DE CONTROLE RADAR / LISTA === */}
-        {statusOnline && !corridaAceita && (
+        {statusOnline && !corridaAceita && !avisoCorridaDirecionada.ativo && (
           <View style={styles.botoesModoContainer}>
             <TouchableOpacity
               style={[styles.botaoModo, modoVisualizacao === 'lista' && styles.botaoModoAtivo, modoVisualizacao === 'lista' && { backgroundColor: temaAgencia.corPrimaria }]}
@@ -1046,7 +1129,7 @@ export default function Radar() {
         )}
 
         {/* STATUS DA PROCURA (Exibe apenas no modo radar ou se estiver offline) */}
-        {(!corridaAceita && (modoVisualizacao === 'radar' || !statusOnline)) && (
+        {(!corridaAceita && !avisoCorridaDirecionada.ativo && (modoVisualizacao === 'radar' || !statusOnline)) && (
           <View style={styles.areaBotaoStatus}>
             <Text style={styles.statusTexto}>
               {statusOnline ? 'Procurando corridas no Radar...' : 'Você está offline'}
@@ -1055,7 +1138,29 @@ export default function Radar() {
         )}
 
         {/* === MODO LISTA === */}
-        {statusOnline && !corridaAceita && modoVisualizacao === 'lista' ? (
+        {statusOnline && avisoCorridaDirecionada.ativo && corridaRecebida ? (
+          <View style={styles.cartaoCorridaDirecionada}>
+            <View style={[styles.iconeDirecionada, { borderColor: temaAgencia.corPrimaria }]}>
+              <Ionicons name="navigate" size={34} color={temaAgencia.corPrimaria} />
+            </View>
+
+            <Text style={[styles.tituloCorridaDirecionada, { color: temaAgencia.corPrimaria }]}>
+              Corrida direcionada para voce
+            </Text>
+
+            <Text style={styles.textoCorridaDirecionada}>
+              A corrida ira iniciar em
+            </Text>
+
+            <View style={[styles.contadorDirecionada, { backgroundColor: temaAgencia.corPrimaria }]}>
+              <Text style={styles.numeroContadorDirecionada}>{avisoCorridaDirecionada.segundos}</Text>
+            </View>
+
+            <Text style={styles.textoCorridaDirecionadaSecundario}>
+              Prepare-se para buscar o passageiro. A buzina continua ativa.
+            </Text>
+          </View>
+        ) : statusOnline && !corridaAceita && modoVisualizacao === 'lista' ? (
           <View style={styles.listaContainer}>
             {corridasDisponiveis.length === 0 ? (
               <Text style={styles.textoVazioLista}>Buscando por novas chamadas...</Text>
@@ -1087,7 +1192,7 @@ export default function Radar() {
         // === MODO RADAR ===
         ) : (
           <>
-            {statusOnline && corridaRecebida && !corridaAceita && (
+            {statusOnline && corridaRecebida && !corridaAceita && !avisoCorridaDirecionada.ativo && (
               <View style={styles.cartaoCorrida}>
                 <View style={styles.cabecalhoCartao}>
                   <Text style={styles.novaCorridaTag}>NOVA CHAMADA</Text>
@@ -1123,7 +1228,7 @@ export default function Radar() {
               </View>
             )}
 
-            {statusOnline && !corridaRecebida && (
+            {statusOnline && !corridaRecebida && !avisoCorridaDirecionada.ativo && (
               <View style={styles.radarBuscando}>
                 <Animated.View style={[
                   styles.sonarWave, 
@@ -1136,7 +1241,7 @@ export default function Radar() {
         )}
 
         {/* === TELA: EM CORRIDA (Independente se veio do Radar ou Lista) === */}
-        {statusOnline && corridaRecebida && corridaAceita && (
+        {statusOnline && corridaRecebida && corridaAceita && !avisoCorridaDirecionada.ativo && (
           <View style={styles.cartaoEmCorrida}>
             <View style={styles.cabecalhoEmCorrida}>
               <Text style={[styles.tituloEmCorrida, { color: temaAgencia.corPrimaria }]}>🚀 EM CORRIDA</Text>
@@ -1395,6 +1500,59 @@ const styles = StyleSheet.create({
   areaBotaoStatus: { width: '100%', alignItems: 'center', marginBottom: 20 },
   statusTexto: { fontSize: 14, fontWeight: 'bold', color: '#888' },
   cartaoCorrida: { backgroundColor: '#fff', width: '100%', borderRadius: 15, padding: 20, elevation: 8, marginBottom: 20 },
+  cartaoCorridaDirecionada: {
+    width: '100%',
+    backgroundColor: '#ffffff',
+    borderRadius: 15,
+    padding: 24,
+    alignItems: 'center',
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    marginBottom: 20,
+  },
+  iconeDirecionada: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    borderWidth: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f8fafc',
+    marginBottom: 16,
+  },
+  tituloCorridaDirecionada: {
+    fontSize: 20,
+    fontWeight: '900',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  textoCorridaDirecionada: {
+    fontSize: 15,
+    color: '#374151',
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  contadorDirecionada: {
+    width: 86,
+    height: 86,
+    borderRadius: 43,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 16,
+  },
+  numeroContadorDirecionada: {
+    color: '#ffffff',
+    fontSize: 42,
+    fontWeight: '900',
+  },
+  textoCorridaDirecionadaSecundario: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#6b7280',
+    textAlign: 'center',
+    fontWeight: '700',
+  },
   cabecalhoCartao: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#eee', paddingBottom: 10, marginBottom: 15 },
   novaCorridaTag: { fontWeight: 'bold', color: '#ff9800', fontSize: 14 },
   valorCorrida: { fontSize: 22, fontWeight: '900', color: '#00c853' },

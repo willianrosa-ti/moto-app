@@ -11,6 +11,9 @@ const PERMISSOES_ANDROID = [
   'android.permission.FOREGROUND_SERVICE',
   'android.permission.FOREGROUND_SERVICE_DATA_SYNC',
   'android.permission.FOREGROUND_SERVICE_LOCATION',
+  'android.permission.POST_NOTIFICATIONS',
+  'android.permission.USE_FULL_SCREEN_INTENT',
+  'android.permission.VIBRATE',
   'android.permission.WAKE_LOCK',
 ];
 
