@@ -7,6 +7,7 @@ import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import { useKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
+import * as Updates from 'expo-updates';
 import React, { useEffect, useRef, useState } from 'react';
 import type { AppStateStatus } from 'react-native';
 import { Alert, Animated, AppState, Easing, Linking, Modal, PermissionsAndroid, Platform, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
@@ -29,6 +30,12 @@ type TemaAgencia = {
   corSecundaria: string;
   corFonteCabecalho: string;
   telefone: string;
+};
+
+type AvisoCorridaDirecionada = {
+  ativo: boolean;
+  segundos: number;
+  terminaEm: number;
 };
 
 const TEMA_AGENCIA_PADRAO: TemaAgencia = {
@@ -109,10 +116,14 @@ export default function Radar() {
   const [localizacaoMotorista, setLocalizacaoMotorista] = useState<Location.LocationObject | null>(null);
   const [menuAberto, setMenuAberto] = useState(false);
   const [confirmarLogoutWeb, setConfirmarLogoutWeb] = useState(false);
+  const [confirmarFinalizacaoWeb, setConfirmarFinalizacaoWeb] = useState(false);
   const [mensagemAvisoWeb, setMensagemAvisoWeb] = useState<string | null>(null);
   const [qtdNotificacoesSuporte, setQtdNotificacoesSuporte] = useState(0);
   const [temaAgencia, setTemaAgencia] = useState<TemaAgencia>(TEMA_AGENCIA_PADRAO);
-  const [avisoCorridaDirecionada, setAvisoCorridaDirecionada] = useState({ ativo: false, segundos: 5 });
+  const [avisoCorridaDirecionada, setAvisoCorridaDirecionada] = useState<AvisoCorridaDirecionada>({ ativo: false, segundos: 5, terminaEm: 0 });
+  const [temCorridaAoFinalizar, setTemCorridaAoFinalizar] = useState(false);
+  const [atualizacaoDisponivel, setAtualizacaoDisponivel] = useState(false);
+  const [verificandoAtualizacao, setVerificandoAtualizacao] = useState(false);
   
   const [valorDiario, setValorDiario] = useState<number>(0); 
   const [mostrarValor, setMostrarValor] = useState(false); 
@@ -134,6 +145,44 @@ export default function Radar() {
 
   const animacaoRadar = useRef(new Animated.Value(0)).current;
   const navegar = useRouter();
+
+  const exibirAvisoCorridaDirecionada = (segundos = 5) => {
+    const segundosNormalizados = Math.max(1, segundos);
+    setAvisoCorridaDirecionada({
+      ativo: true,
+      segundos: segundosNormalizados,
+      terminaEm: Date.now() + segundosNormalizados * 1000
+    });
+  };
+
+  const atualizarContadorCorridaDirecionada = () => {
+    setAvisoCorridaDirecionada((estadoAtual) => {
+      if (!estadoAtual.ativo) return estadoAtual;
+
+      const segundosRestantes = Math.ceil((estadoAtual.terminaEm - Date.now()) / 1000);
+      if (segundosRestantes <= 0) {
+        return { ativo: false, segundos: 5, terminaEm: 0 };
+      }
+
+      if (segundosRestantes === estadoAtual.segundos) return estadoAtual;
+      return { ...estadoAtual, segundos: segundosRestantes };
+    });
+  };
+
+  const verificarAtualizacaoApp = async () => {
+    if (Platform.OS === 'web' || !Updates.isEnabled || verificandoAtualizacao) return false;
+
+    try {
+      setVerificandoAtualizacao(true);
+      const resultado = await Updates.checkForUpdateAsync();
+      setAtualizacaoDisponivel(resultado.isAvailable);
+      return resultado.isAvailable;
+    } catch (erro) {
+      return false;
+    } finally {
+      setVerificandoAtualizacao(false);
+    }
+  };
 
 
   const carregarTemaAgenciaSalvo = async () => {
@@ -312,13 +361,11 @@ export default function Radar() {
           setStatusOnline(true);       // Liga o radar para o GPS continuar rastreando
           statusOnlineRef.current = true;
           setCorridasDisponiveis([]);
+          setTemCorridaAoFinalizar(corrida?.temCorridaAoFinalizar === true);
 
           if (opcoes.mostrarAvisoDirecionada && corridaDirecionada) {
             setModoVisualizacao('radar');
-            setAvisoCorridaDirecionada({
-              ativo: true,
-              segundos: Math.max(1, opcoes.segundos || 5)
-            });
+            exibirAvisoCorridaDirecionada(opcoes.segundos || 5);
           }
 
           return true;
@@ -370,6 +417,7 @@ export default function Radar() {
       segundos: 5
     });
     buscarNotificacoesSuporteMotorista();
+    verificarAtualizacaoApp();
     Audio.setAudioModeAsync({
       allowsRecordingIOS: false,
       interruptionModeIOS: InterruptionModeIOS.DoNotMix,
@@ -394,9 +442,14 @@ export default function Radar() {
       estadoAppRef.current = estado;
       AppOverlay.setRideMonitorForeground(estado === 'active').catch(() => {});
 
-      if (estado === 'active' && !corridaRecebidaRef.current) {
+      if (estado === 'active') {
+        atualizarContadorCorridaDirecionada();
+        verificarAtualizacaoApp();
+      }
+
+      if (estado === 'active') {
         verificarCorridaAtiva({
-          mostrarAvisoDirecionada: Platform.OS === 'android',
+          mostrarAvisoDirecionada: !corridaRecebidaRef.current && Platform.OS === 'android',
           segundos: 5
         });
       }
@@ -588,20 +641,11 @@ export default function Radar() {
   useEffect(() => {
     if (!avisoCorridaDirecionada.ativo) return undefined;
 
-    const temporizador = setTimeout(() => {
-      setAvisoCorridaDirecionada((estadoAtual) => {
-        if (!estadoAtual.ativo) return estadoAtual;
+    atualizarContadorCorridaDirecionada();
+    const temporizador = setInterval(atualizarContadorCorridaDirecionada, 500);
 
-        if (estadoAtual.segundos <= 1) {
-          return { ativo: false, segundos: 5 };
-        }
-
-        return { ...estadoAtual, segundos: estadoAtual.segundos - 1 };
-      });
-    }, 1000);
-
-    return () => clearTimeout(temporizador);
-  }, [avisoCorridaDirecionada.ativo, avisoCorridaDirecionada.segundos]);
+    return () => clearInterval(temporizador);
+  }, [avisoCorridaDirecionada.ativo, avisoCorridaDirecionada.terminaEm]);
 
   // Som para o modo RADAR
   useEffect(() => {
@@ -658,6 +702,11 @@ export default function Radar() {
     conexao.on("CorridaAtribuida", (payload: any) => {
       const segundos = Number(payload?.iniciarEmSegundos || 5);
       prepararCorridaAtribuida(Number.isFinite(segundos) ? segundos : 5);
+    });
+
+    conexao.on("CorridaDirecionadaAguardando", () => {
+      setTemCorridaAoFinalizar(true);
+      buscarNotificacoesSuporteMotorista();
     });
 
     conexao.on("AtualizarCorridas", () => {
@@ -893,6 +942,28 @@ export default function Radar() {
     }
   };
 
+  const pedirConfirmacaoFinalizacao = () => {
+    if (!corridaRecebida) return;
+
+    if (Platform.OS === 'web') {
+      setConfirmarFinalizacaoWeb(true);
+      return;
+    }
+
+    Alert.alert(
+      "Finalizar corrida",
+      "Tem certeza que deseja finalizar esta corrida?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Finalizar",
+          style: "destructive",
+          onPress: finalizarCorridaReal
+        }
+      ]
+    );
+  };
+
   const finalizarCorridaReal = async () => {
     try {
       const token = await AsyncStorage.getItem('tokenMotorista');
@@ -905,14 +976,24 @@ export default function Radar() {
       });
 
       if (resposta.ok) {
+        const dadosResposta = await resposta.json().catch(() => ({}));
         setValorDiario(prev => prev + corridaRecebida.valor);
+        setTemCorridaAoFinalizar(false);
 
-        setCorridaAceita(false);
-        setCorridaRecebida(null);
         setTempoRestante(15);
-        setSinalNovaCorrida(gatilho => gatilho + 1); 
+        setSinalNovaCorrida(gatilho => gatilho + 1);
 
-        buscarGanhosDoDia(); 
+        if (dadosResposta?.proximaCorridaAtivada) {
+          await verificarCorridaAtiva({
+            mostrarAvisoDirecionada: true,
+            segundos: 5
+          });
+        } else {
+          setCorridaAceita(false);
+          setCorridaRecebida(null);
+        }
+
+        buscarGanhosDoDia();
       } else {
         Alert.alert("Erro", "Erro ao finalizar.");
       }
@@ -977,7 +1058,7 @@ export default function Radar() {
 
           <TouchableOpacity style={styles.botaoMenu} onPress={() => setMenuAberto(true)}>
             <Text style={[styles.iconeMenu, { color: temaAgencia.corFonteCabecalho }]}>≡</Text>
-            {qtdNotificacoesSuporte > 0 && <View style={styles.badgeMenuRecursos} />}
+            {(qtdNotificacoesSuporte > 0 || atualizacaoDisponivel) && <View style={styles.badgeMenuRecursos} />}
           </TouchableOpacity>
         </View>
       </View>
@@ -1020,9 +1101,9 @@ export default function Radar() {
                   <Ionicons name="notifications-outline" size={20} color={temaAgencia.corPrimaria} />
                   <View style={styles.notificacaoMenuLinha}>
                     <Text style={styles.textoItemMenu}>NOTIFICAÇÕES</Text>
-                    {qtdNotificacoesSuporte > 0 && (
+                    {(qtdNotificacoesSuporte > 0 || atualizacaoDisponivel) && (
                       <View style={styles.badgeNotificacaoMenu}>
-                        <Text style={styles.textoBadgeNotificacaoMenu}>{qtdNotificacoesSuporte}</Text>
+                        <Text style={styles.textoBadgeNotificacaoMenu}>{qtdNotificacoesSuporte + (atualizacaoDisponivel ? 1 : 0)}</Text>
                       </View>
                     )}
                   </View>
@@ -1076,6 +1157,43 @@ export default function Radar() {
                   }}
                 >
                   <Text style={styles.textoSairConfirmacaoWeb}>Sair</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {Platform.OS === 'web' && (
+        <Modal
+          visible={confirmarFinalizacaoWeb}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setConfirmarFinalizacaoWeb(false)}
+        >
+          <View style={styles.fundoConfirmacaoWeb}>
+            <View style={styles.caixaConfirmacaoWeb}>
+              <Text style={styles.tituloConfirmacaoWeb}>Finalizar corrida</Text>
+              <Text style={styles.textoConfirmacaoWeb}>
+                Tem certeza que deseja finalizar esta corrida?
+              </Text>
+
+              <View style={styles.botoesConfirmacaoWeb}>
+                <TouchableOpacity
+                  style={styles.botaoCancelarConfirmacaoWeb}
+                  onPress={() => setConfirmarFinalizacaoWeb(false)}
+                >
+                  <Text style={styles.textoCancelarConfirmacaoWeb}>Cancelar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.botaoSairConfirmacaoWeb}
+                  onPress={async () => {
+                    setConfirmarFinalizacaoWeb(false);
+                    await finalizarCorridaReal();
+                  }}
+                >
+                  <Text style={styles.textoSairConfirmacaoWeb}>Finalizar</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1255,6 +1373,7 @@ export default function Radar() {
             <View style={styles.blocoEndereco}>
               <Text style={styles.tituloBloco}>📍 BUSCAR EM:</Text>
               <Text style={styles.enderecoTexto}>{corridaRecebida.busca}</Text>
+              <Text style={styles.distanciaTextoCompacta}>{formatarQuilometragem(corridaRecebida.distanciaBusca)}</Text>
               <View style={styles.botoesGpsLinha}>
                 <TouchableOpacity style={[styles.btnGps, styles.waze]} onPress={() => abrirGPS('waze', corridaRecebida.busca)}>
                   <Text style={styles.btnTextoBranco}>Waze</Text>
@@ -1270,6 +1389,7 @@ export default function Radar() {
             <View style={styles.blocoEndereco}>
               <Text style={styles.tituloBloco}>🏁 LEVAR PARA:</Text>
               <Text style={styles.enderecoTexto}>{corridaRecebida.destino}</Text>
+              <Text style={styles.distanciaTextoCompacta}>{formatarQuilometragem(corridaRecebida.distanciaDestino)}</Text>
               <View style={styles.botoesGpsLinha}>
                 <TouchableOpacity style={[styles.btnGps, styles.waze]} onPress={() => abrirGPS('waze', corridaRecebida.destino)}>
                   <Text style={styles.btnTextoBranco}>Waze</Text>
@@ -1280,9 +1400,16 @@ export default function Radar() {
               </View>
             </View>
 
-            <TouchableOpacity style={[styles.btnFinalizarTotal, { backgroundColor: temaAgencia.corPrimaria }]} onPress={finalizarCorridaReal}>
+            <TouchableOpacity style={[styles.btnFinalizarTotal, { backgroundColor: temaAgencia.corPrimaria }]} onPress={pedirConfirmacaoFinalizacao}>
               <Text style={styles.btnTextoBranco}>FINALIZAR CORRIDA</Text>
             </TouchableOpacity>
+
+            {temCorridaAoFinalizar && (
+              <View style={[styles.caixaProximaCorrida, { borderColor: temaAgencia.corPrimaria }]}>
+                <Ionicons name="notifications" size={20} color={temaAgencia.corPrimaria} />
+                <Text style={styles.textoProximaCorrida}>Voce tem uma nova corrida ao finalizar essa.</Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -1564,6 +1691,7 @@ const styles = StyleSheet.create({
   nomePassageiroChamada: { fontSize: 20, color: '#333', fontWeight: 'bold' },
   enderecoChamada: { fontSize: 16, color: '#222', fontWeight: '600' },
   distanciaTexto: { fontSize: 14, color: '#007bff', fontWeight: '700', marginBottom: 10 },
+  distanciaTextoCompacta: { fontSize: 13, color: '#007bff', fontWeight: '800', marginTop: -5, marginBottom: 8 },
   acoesCorrida: { flexDirection: 'row', gap: 10 },
   btnRecusar: { flex: 1, backgroundColor: '#ffebee', padding: 15, borderRadius: 8, alignItems: 'center' },
   btnAceitar: { flex: 2, backgroundColor: '#00c853', padding: 15, borderRadius: 8, alignItems: 'center' },
@@ -1583,6 +1711,24 @@ const styles = StyleSheet.create({
   maps: { backgroundColor: '#4285f4' },
   divisor: { borderTopWidth: 1, borderTopColor: '#ccc', borderStyle: 'dashed', marginVertical: 20 },
   btnFinalizarTotal: { backgroundColor: '#28a745', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 10 },
+  caixaProximaCorrida: {
+    marginTop: 12,
+    width: '100%',
+    borderWidth: 1.5,
+    borderRadius: 10,
+    padding: 12,
+    backgroundColor: '#f8fafc',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  textoProximaCorrida: {
+    flex: 1,
+    color: '#1f2937',
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 19,
+  },
   radarBuscando: { marginTop: 50, alignItems: 'center' },
   sonarWave: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#00e676', marginBottom: 20 },
   textoBuscando: { color: '#00e676', fontWeight: 'bold', fontSize: 16 },

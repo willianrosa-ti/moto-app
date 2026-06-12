@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, StatusBar, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, StatusBar, Alert, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Updates from 'expo-updates';
 
 const API_BASE = 'https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net';
 
@@ -41,6 +42,8 @@ export default function NotificacoesAgencia() {
   const [carregando, setCarregando] = useState(true);
   const [notificacoes, setNotificacoes] = useState<NotificacaoAgencia[]>([]);
   const [temaAgencia, setTemaAgencia] = useState<TemaAgencia>(TEMA_AGENCIA_PADRAO);
+  const [atualizacaoDisponivel, setAtualizacaoDisponivel] = useState(false);
+  const [atualizandoApp, setAtualizandoApp] = useState(false);
 
 
   const carregarTemaAgenciaSalvo = async () => {
@@ -131,9 +134,40 @@ export default function NotificacoesAgencia() {
     }
   };
 
+  const verificarAtualizacaoApp = async () => {
+    if (Platform.OS === 'web' || !Updates.isEnabled) return;
+
+    try {
+      const resultado = await Updates.checkForUpdateAsync();
+      setAtualizacaoDisponivel(resultado.isAvailable);
+    } catch (erro) {
+      setAtualizacaoDisponivel(false);
+    }
+  };
+
+  const atualizarApp = async () => {
+    try {
+      setAtualizandoApp(true);
+      const resultado = await Updates.fetchUpdateAsync();
+
+      if (resultado.isNew) {
+        await Updates.reloadAsync();
+        return;
+      }
+
+      setAtualizacaoDisponivel(false);
+      Alert.alert('Tudo certo', 'Seu app ja esta atualizado.');
+    } catch (erro) {
+      Alert.alert('Atualizacao', 'Nao foi possivel atualizar o app agora.');
+    } finally {
+      setAtualizandoApp(false);
+    }
+  };
+
   useEffect(() => {
     carregarTemaAgenciaSalvo();
     buscarNotificacoes();
+    verificarAtualizacaoApp();
   }, []);
 
   return (
@@ -159,6 +193,28 @@ export default function NotificacoesAgencia() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.conteudo}>
+          {atualizacaoDisponivel && (
+            <View style={[styles.cardAtualizacao, { borderColor: temaAgencia.corPrimaria }]}>
+              <View style={styles.linhaAtualizacao}>
+                <Ionicons name="cloud-download-outline" size={26} color={temaAgencia.corPrimaria} />
+                <View style={styles.textosAtualizacao}>
+                  <Text style={styles.tituloAtualizacao}>Nova atualizacao disponivel</Text>
+                  <Text style={styles.textoAtualizacao}>Toque para baixar e reiniciar o app.</Text>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.botaoAtualizarApp, { backgroundColor: temaAgencia.corPrimaria }]}
+                onPress={atualizarApp}
+                disabled={atualizandoApp}
+              >
+                <Text style={styles.textoBotaoAtualizarApp}>
+                  {atualizandoApp ? 'Atualizando...' : 'Atualizar APP'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {notificacoes.length === 0 ? (
             <View style={styles.cardVazio}>
               <Ionicons name="notifications-off-outline" size={42} color="#999" />
@@ -240,6 +296,45 @@ const styles = StyleSheet.create({
   conteudo: {
     padding: 16,
     paddingBottom: 40,
+  },
+  cardAtualizacao: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 14,
+    borderWidth: 2,
+    borderColor: '#28a745',
+    elevation: 2,
+  },
+  linhaAtualizacao: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 14,
+  },
+  textosAtualizacao: {
+    flex: 1,
+  },
+  tituloAtualizacao: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#1f2937',
+  },
+  textoAtualizacao: {
+    marginTop: 3,
+    fontSize: 13,
+    color: '#6b7280',
+    fontWeight: '700',
+  },
+  botaoAtualizarApp: {
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  textoBotaoAtualizarApp: {
+    color: '#fff',
+    fontWeight: '900',
+    fontSize: 14,
   },
   cardVazio: {
     backgroundColor: '#fff',

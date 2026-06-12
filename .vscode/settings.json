@@ -3,5 +3,32 @@
     "source.fixAll": "explicit",
     "source.organizeImports": "explicit",
     "source.sortMembers": "explicit"
+  },
+  "java.errors.incompleteClasspath.severity": "ignore",
+  "java.import.exclusions": [
+    "**/node_modules/**",
+    "**/.expo/**",
+    "**/android/.cxx/**",
+    "**/android/.gradle/**",
+    "**/plugins/native/**"
+  ],
+  "java.project.resourceFilters": [
+    "node_modules",
+    ".expo",
+    "android/.cxx",
+    "android/.gradle",
+    "plugins/native"
+  ],
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/.expo/**": true,
+    "**/android/.cxx/**": true,
+    "**/android/.gradle/**": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/.expo": true,
+    "**/android/.cxx": true,
+    "**/android/.gradle": true
   }
 }
