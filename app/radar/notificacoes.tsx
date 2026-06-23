@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, StatusBar, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, StatusBar, Alert, Platform, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Updates from 'expo-updates';
+import Constants from 'expo-constants';
 
 const API_BASE = 'https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net';
+const VERSAO_APP_MOTORISTA = Constants.expoConfig?.version || '1.0.6';
 
 const COR_PRIMARIA_PADRAO = '#28a745';
 const COR_SECUNDARIA_PADRAO = '#00c853';
@@ -36,6 +38,14 @@ type NotificacaoAgencia = {
   lidaPeloMotorista: boolean;
 };
 
+type AtualizacaoBackend = {
+  versao?: string;
+  changelog?: string | null;
+  obrigatoria?: boolean;
+  link?: string | null;
+  linkDownload?: string | null;
+};
+
 export default function NotificacoesAgencia() {
   const navegar = useRouter();
 
@@ -44,6 +54,7 @@ export default function NotificacoesAgencia() {
   const [temaAgencia, setTemaAgencia] = useState<TemaAgencia>(TEMA_AGENCIA_PADRAO);
   const [atualizacaoDisponivel, setAtualizacaoDisponivel] = useState(false);
   const [atualizandoApp, setAtualizandoApp] = useState(false);
+  const [atualizacaoBackend, setAtualizacaoBackend] = useState<AtualizacaoBackend | null>(null);
 
 
   const carregarTemaAgenciaSalvo = async () => {
@@ -135,12 +146,28 @@ export default function NotificacoesAgencia() {
   };
 
   const verificarAtualizacaoApp = async () => {
-    if (Platform.OS === 'web' || !Updates.isEnabled) return;
+    if (Platform.OS === 'web') return;
 
     try {
-      const resultado = await Updates.checkForUpdateAsync();
-      setAtualizacaoDisponivel(resultado.isAvailable);
-    } catch (erro) {
+      let existeAtualizacaoExpo = false;
+
+      if (Updates.isEnabled) {
+        const resultado = await Updates.checkForUpdateAsync();
+        existeAtualizacaoExpo = resultado.isAvailable;
+      }
+
+      const params = new URLSearchParams({
+        produto: 'app-motorista',
+        versaoAtual: VERSAO_APP_MOTORISTA,
+        canal: 'main'
+      });
+      const respostaBackend = await fetch(`${API_BASE}/api/Atualizacoes/mais-recente?${params.toString()}`);
+      const dadosBackend = respostaBackend.ok ? await respostaBackend.json() : null;
+      const novaAtualizacaoBackend = dadosBackend?.atualizacaoDisponivel ? dadosBackend.atualizacao : null;
+
+      setAtualizacaoBackend(novaAtualizacaoBackend);
+      setAtualizacaoDisponivel(existeAtualizacaoExpo || Boolean(novaAtualizacaoBackend));
+    } catch {
       setAtualizacaoDisponivel(false);
     }
   };
@@ -148,16 +175,26 @@ export default function NotificacoesAgencia() {
   const atualizarApp = async () => {
     try {
       setAtualizandoApp(true);
-      const resultado = await Updates.fetchUpdateAsync();
 
-      if (resultado.isNew) {
-        await Updates.reloadAsync();
+      if (Updates.isEnabled) {
+        const resultado = await Updates.fetchUpdateAsync();
+
+        if (resultado.isNew) {
+          await Updates.reloadAsync();
+          return;
+        }
+      }
+
+      const link = atualizacaoBackend?.linkDownload || atualizacaoBackend?.link;
+
+      if (link) {
+        await Linking.openURL(link);
         return;
       }
 
       setAtualizacaoDisponivel(false);
       Alert.alert('Tudo certo', 'Seu app ja esta atualizado.');
-    } catch (erro) {
+    } catch {
       Alert.alert('Atualizacao', 'Nao foi possivel atualizar o app agora.');
     } finally {
       setAtualizandoApp(false);
@@ -199,7 +236,11 @@ export default function NotificacoesAgencia() {
                 <Ionicons name="cloud-download-outline" size={26} color={temaAgencia.corPrimaria} />
                 <View style={styles.textosAtualizacao}>
                   <Text style={styles.tituloAtualizacao}>Nova atualizacao disponivel</Text>
-                  <Text style={styles.textoAtualizacao}>Toque para baixar e reiniciar o app.</Text>
+                  <Text style={styles.textoAtualizacao}>
+                    {atualizacaoBackend?.versao
+                      ? `Versao ${atualizacaoBackend.versao}. ${atualizacaoBackend.changelog || 'Toque para baixar.'}`
+                      : 'Toque para baixar e reiniciar o app.'}
+                  </Text>
                 </View>
               </View>
 

@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as signalR from '@microsoft/signalr';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
+import Constants from 'expo-constants';
 import { useKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
@@ -16,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 const ficheiroBuzina = require('../../assets/sounds/buzina.mp3');
 
 const API_BASE = 'https://motoapp-bwadauh0dbcqbubb.centralus-01.azurewebsites.net';
+const VERSAO_APP_MOTORISTA = Constants.expoConfig?.version || '1.0.6';
 
 const NOME_AGENCIA_PADRAO = 'RADAR DO MOTORISTA';
 const COR_PRIMARIA_PADRAO = '#28a745';
@@ -170,14 +172,30 @@ export default function Radar() {
   };
 
   const verificarAtualizacaoApp = async () => {
-    if (Platform.OS === 'web' || !Updates.isEnabled || verificandoAtualizacao) return false;
+    if (Platform.OS === 'web' || verificandoAtualizacao) return false;
 
     try {
       setVerificandoAtualizacao(true);
-      const resultado = await Updates.checkForUpdateAsync();
-      setAtualizacaoDisponivel(resultado.isAvailable);
-      return resultado.isAvailable;
-    } catch (erro) {
+
+      let existeAtualizacaoExpo = false;
+
+      if (Updates.isEnabled) {
+        const resultado = await Updates.checkForUpdateAsync();
+        existeAtualizacaoExpo = resultado.isAvailable;
+      }
+
+      const params = new URLSearchParams({
+        produto: 'app-motorista',
+        versaoAtual: VERSAO_APP_MOTORISTA,
+        canal: 'main'
+      });
+      const respostaBackend = await fetch(`${API_BASE}/api/Atualizacoes/mais-recente?${params.toString()}`);
+      const dadosBackend = respostaBackend.ok ? await respostaBackend.json() : null;
+      const existeAtualizacaoBackend = Boolean(dadosBackend?.atualizacaoDisponivel);
+
+      setAtualizacaoDisponivel(existeAtualizacaoExpo || existeAtualizacaoBackend);
+      return existeAtualizacaoExpo || existeAtualizacaoBackend;
+    } catch {
       return false;
     } finally {
       setVerificandoAtualizacao(false);
