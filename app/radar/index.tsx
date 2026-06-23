@@ -1,5 +1,5 @@
-import WebPwaNotice from '@/components/WebPwaNotice';
-import AppOverlay from '@/native/AppOverlay';
+import WebPwaNotice from '../../components/WebPwaNotice';
+import AppOverlay from '../../native/AppOverlay';
 import { Ionicons } from '@expo/vector-icons';
 import * as signalR from '@microsoft/signalr';
 import AsyncStorage from '@react-native-async-storage/async-storage';

@@ -1,6 +1,6 @@
 import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import NativeAppSetup from '@/components/NativeAppSetup';
+import NativeAppSetup from '../components/NativeAppSetup';
 
 export default function Layout() {
   return (

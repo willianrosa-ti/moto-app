@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { AppState, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import AppOverlay from '@/native/AppOverlay';
+import AppOverlay from '../native/AppOverlay';
 
 const CHAVE_PERMISSAO_SOBREPOSICAO = 'permissaoSobreposicaoSolicitadaMotorista';
 
