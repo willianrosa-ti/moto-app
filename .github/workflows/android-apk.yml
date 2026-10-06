@@ -18,6 +18,8 @@ on:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       NODE_ENV: production
 
@@ -79,3 +81,20 @@ jobs:
           name: app-motorista-${{ env.APP_VERSION }}-release-apk
           path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+
+      # Uma release por versão: para publicar outro APK, aumente a versão no package.json/app.json.
+      - name: Publish GitHub release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="app-motorista-$APP_VERSION"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists. Skipping upload."
+            exit 0
+          fi
+          cp android/app/build/outputs/apk/release/app-release.apk "$TAG.apk"
+          gh release create "$TAG" "$TAG.apk" \
+            --target "$GITHUB_SHA" \
+            --title "App Motorista $APP_VERSION" \
+            --notes "APK do app do motorista $APP_VERSION."
