@@ -70,9 +70,12 @@ jobs:
           cd android
           ./gradlew assembleRelease --no-daemon --no-parallel -x lintVitalAnalyzeRelease
 
+      - name: Read app version
+        run: echo "APP_VERSION=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-motorista-1.0.6-release-apk
+          name: app-motorista-${{ env.APP_VERSION }}-release-apk
           path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error

@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import NativeAppSetup from '../components/NativeAppSetup';
+import ChatMotorista from '../components/ChatMotorista';
 
 export default function Layout() {
   return (
@@ -11,6 +12,7 @@ export default function Layout() {
           headerShown: false,
         }}
       />
+      <ChatMotorista />
     </SafeAreaProvider>
   );
 }

@@ -71,6 +71,9 @@ public class RideMonitorService extends Service {
     private LocationListener locationListener;
     private PowerManager.WakeLock wakeLock;
     private volatile String token;
+    private volatile boolean radarAtivo = true;
+    private long ultimaConsultaMensagens = 0;
+    private final Set<String> filaConhecida = new HashSet<>();
     private volatile String apiBase = API_BASE_PADRAO;
     private volatile Location ultimaLocalizacao;
     private volatile long ultimoEnvioLocalizacaoMs = 0L;
@@ -103,7 +106,7 @@ public class RideMonitorService extends Service {
         iniciarForeground();
         iniciarWakeLock();
         iniciarLoop();
-        iniciarMonitoramentoLocalizacao();
+        if (radarAtivo) iniciarMonitoramentoLocalizacao(); else pararMonitoramentoLocalizacao();
 
         return START_STICKY;
     }
@@ -119,6 +122,11 @@ public class RideMonitorService extends Service {
     private void atualizarCredenciais(Intent intent) {
         if (intent == null) return;
 
+        radarAtivo = intent.getBooleanExtra("radarAtivo", true);
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean("radarAtivo", radarAtivo).apply();
+        if (intent.hasExtra("refreshToken")) {
+            try { DriverSessionSecrets.save(this, intent.getStringExtra("refreshToken")); } catch (Exception ignored) { }
+        }
         String novoToken = intent.getStringExtra(EXTRA_TOKEN);
         String novaApiBase = intent.getStringExtra(EXTRA_API_BASE);
 
@@ -144,6 +152,7 @@ public class RideMonitorService extends Service {
 
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         token = prefs.getString(PREF_TOKEN, null);
+        radarAtivo = prefs.getBoolean("radarAtivo", true);
         apiBase = normalizarApiBase(prefs.getString(PREF_API_BASE, API_BASE_PADRAO));
     }
 
@@ -152,8 +161,8 @@ public class RideMonitorService extends Service {
         Notification notification = criarNotificacao();
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            int tiposForeground = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC;
-            if (temPermissaoLocalizacao()) {
+            int tiposForeground = Build.VERSION.SDK_INT >= 34 ? ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING : 0;
+            if (radarAtivo && temPermissaoLocalizacao()) {
                 tiposForeground |= ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
             }
 
@@ -180,6 +189,17 @@ public class RideMonitorService extends Service {
     }
 
     private void consultarCorridasComSeguranca() {
+        try {
+            if (!renovarTokenSeNecessario()) return;
+            if (System.currentTimeMillis() - ultimaConsultaMensagens > 12000) {
+                ultimaConsultaMensagens = System.currentTimeMillis();
+                consultarMensagens();
+                consultarJornada();
+            }
+            if (!radarAtivo) return;
+            consultarFila();
+        } catch (Exception ignored) { }
+        if (!radarAtivo) return;
         try {
             consultarCorridaAtivaComSeguranca();
         } catch (Exception ignored) {
@@ -439,7 +459,7 @@ public class RideMonitorService extends Service {
     }
 
     private void enviarLocalizacaoComSeguranca(Location location, boolean forcar) {
-        if (location == null || appEmPrimeiroPlano) return;
+        if (location == null || appEmPrimeiroPlano || !radarAtivo) return;
 
         String tokenAtual = token;
         if (tokenAtual == null || tokenAtual.trim().isEmpty()) return;
@@ -604,6 +624,7 @@ public class RideMonitorService extends Service {
         idsConhecidos.clear();
         corridaAtivaConhecidaId = null;
         token = null;
+        DriverSessionSecrets.clear(this);
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().clear().apply();
         stopForeground(true);
         stopSelf();
@@ -651,8 +672,8 @@ public class RideMonitorService extends Service {
             : new Notification.Builder(this);
 
         return builder
-            .setContentTitle("MIL-LIN motorista online")
-            .setContentText("Monitorando corridas e GPS em segundo plano.")
+            .setContentTitle(radarAtivo ? "MIL-LIN motorista online" : "MIL-LIN mensagens")
+            .setContentText(radarAtivo ? "Corridas, mensagens e GPS ativos." : "Recebendo mensagens da agência. Radar desligado.")
             .setSmallIcon(icone)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -692,7 +713,9 @@ public class RideMonitorService extends Service {
         }
     }
 
-    private void notificarCorridaDirecionada() {
+    private void notificarCorridaDirecionada() { notificarCorridaDirecionada(false); }
+
+    private void notificarCorridaDirecionada(boolean emFila) {
         criarCanalNotificacao();
 
         PendingIntent pendingIntent = criarPendingIntentAbrirApp(1);
@@ -703,15 +726,15 @@ public class RideMonitorService extends Service {
             : new Notification.Builder(this);
 
         builder
-            .setContentTitle("Corrida direcionada para voce")
-            .setContentText("A corrida ira iniciar em 5 segundos.")
+            .setContentTitle(emFila ? "Nova corrida na fila" : "Corrida direcionada para voce")
+            .setContentText(emFila ? "Você tem outra corrida aguardando a conclusão da atual." : "A corrida ira iniciar em 5 segundos.")
             .setSmallIcon(icone)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .setCategory(Notification.CATEGORY_ALARM)
             .setPriority(Notification.PRIORITY_MAX)
             .setDefaults(Notification.DEFAULT_ALL)
-            .setFullScreenIntent(pendingIntent, true)
+            .setFullScreenIntent(pendingIntent, !emFila)
             .setVibrate(new long[] {0, 450, 250, 450});
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -722,6 +745,98 @@ public class RideMonitorService extends Service {
         if (manager != null) {
             manager.notify(ALERT_NOTIFICATION_ID, builder.build());
         }
+    }
+
+    private boolean renovarTokenSeNecessario() throws Exception {
+        if (token == null) return false;
+        try {
+            String payload = new String(android.util.Base64.decode(token.split("\\.")[1], android.util.Base64.URL_SAFE), StandardCharsets.UTF_8);
+            if (new JSONObject(payload).optLong("exp") * 1000 > System.currentTimeMillis() + 120000) return true;
+        } catch (Exception ignored) { }
+        String refresh = DriverSessionSecrets.read(this);
+        if (refresh.isEmpty()) return false;
+        HttpURLConnection connection = (HttpURLConnection) new URL(apiBase + "/api/Autenticacao/renovar-motorista").openConnection();
+        try {
+            connection.setRequestMethod("POST"); connection.setConnectTimeout(10000); connection.setReadTimeout(10000);
+            connection.setDoOutput(true); connection.setRequestProperty("Content-Type", "application/json");
+            byte[] body = new JSONObject().put("refreshToken", refresh).toString().getBytes(StandardCharsets.UTF_8);
+            try (OutputStream out = connection.getOutputStream()) { out.write(body); }
+            int status = connection.getResponseCode();
+            if (status == 401 || status == 403) { pararMonitoramento(); return false; }
+            if (status != 200) return false;
+            token = new JSONObject(lerResposta(connection.getInputStream())).getString("token");
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(PREF_TOKEN, token).apply();
+            return true;
+        } finally { connection.disconnect(); }
+    }
+
+    private String consultarJson(String endpoint) throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) new URL(apiBase + endpoint).openConnection();
+        try {
+            connection.setRequestProperty("Authorization", "Bearer " + token);
+            connection.setConnectTimeout(10000); connection.setReadTimeout(10000);
+            if (connection.getResponseCode() != 200) return null;
+            return lerResposta(connection.getInputStream());
+        } finally { connection.disconnect(); }
+    }
+
+    private void consultarMensagens() throws Exception {
+        if (appEmPrimeiroPlano) return;
+        String json = consultarJson("/api/Chat/mensagens");
+        if (json == null) return;
+        JSONArray mensagens = new JSONObject(json).optJSONArray("mensagens");
+        if (mensagens == null) return;
+        for (int i = mensagens.length() - 1; i >= 0; i--) {
+            JSONObject m = mensagens.getJSONObject(i);
+            if ("Agencia".equals(m.optString("remetente")) && m.isNull("lidaEm")) {
+                DriverNotifications.show(this, m.optString("id"), "Mensagem da agência", m.optString("texto"));
+                break;
+            }
+        }
+        String suporteJson = consultarJson("/api/Suporte/minhas-respostas");
+        if (suporteJson != null) {
+            JSONArray suporte = new JSONArray(suporteJson);
+            for (int i = 0; i < suporte.length(); i++) {
+                JSONObject m = suporte.getJSONObject(i);
+                if (!m.optBoolean("lidaPeloMotorista", true)) {
+                    DriverNotifications.show(this, "suporte-" + m.optString("id"), "Resposta de suporte", m.optString("respostaAgencia")); break;
+                }
+            }
+        }
+    }
+
+    private void consultarFila() throws Exception {
+        String json = consultarJson("/api/Corrida/fila");
+        if (json == null) return;
+        JSONArray fila = new JSONArray(json);
+        Set<String> atual = new HashSet<>();
+        boolean nova = false;
+        for (int i = 0; i < fila.length(); i++) {
+            String id = fila.getJSONObject(i).optString("id"); atual.add(id);
+            if (!filaConhecida.contains(id)) nova = true;
+        }
+        filaConhecida.clear(); filaConhecida.addAll(atual);
+        if (nova) { tocarAlertaCorrida(); notificarCorridaDirecionada(true); }
+    }
+
+    private void consultarJornada() throws Exception {
+        if (!radarAtivo) return;
+        String json = consultarJson("/api/Motorista/jornada");
+        if (json == null) return;
+        JSONObject jornada = new JSONObject(json);
+        if (jornada.optBoolean("podeReceber") || jornada.optBoolean("podeContinuar")) return;
+        HttpURLConnection connection = (HttpURLConnection) new URL(apiBase + "/api/Motorista/alterar-status-online").openConnection();
+        try {
+            connection.setRequestMethod("POST"); connection.setConnectTimeout(10000); connection.setReadTimeout(10000);
+            connection.setDoOutput(true); connection.setRequestProperty("Content-Type", "application/json");
+            connection.setRequestProperty("Authorization", "Bearer " + token);
+            try (OutputStream out = connection.getOutputStream()) { out.write("false".getBytes(StandardCharsets.UTF_8)); }
+            if (connection.getResponseCode() != 200) return;
+        } finally { connection.disconnect(); }
+        radarAtivo = false;
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean("radarAtivo", false).apply();
+        pararMonitoramentoLocalizacao();
+        DriverNotifications.show(this, "jornada-" + java.time.LocalDate.now(), "Turno encerrado", jornada.optString("mensagem", "Radar desligado fora do horário de atuação."));
     }
 
     private String normalizarApiBase(String valor) {

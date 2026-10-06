@@ -1,3 +1,4 @@
+import { motoristaFetch, obterTokenMotorista, obterRefreshToken, encerrarSessao } from '../../services/motoristaApi';
 import WebPwaNotice from '../../components/WebPwaNotice';
 import AppOverlay from '../../native/AppOverlay';
 import { Ionicons } from '@expo/vector-icons';
@@ -119,6 +120,7 @@ export default function Radar() {
   const [menuAberto, setMenuAberto] = useState(false);
   const [confirmarLogoutWeb, setConfirmarLogoutWeb] = useState(false);
   const [confirmarFinalizacaoWeb, setConfirmarFinalizacaoWeb] = useState(false);
+  const [alterandoEtapa, setAlterandoEtapa] = useState(false);
   const [mensagemAvisoWeb, setMensagemAvisoWeb] = useState<string | null>(null);
   const [qtdNotificacoesSuporte, setQtdNotificacoesSuporte] = useState(0);
   const [temaAgencia, setTemaAgencia] = useState<TemaAgencia>(TEMA_AGENCIA_PADRAO);
@@ -189,7 +191,7 @@ export default function Radar() {
         versaoAtual: VERSAO_APP_MOTORISTA,
         canal: 'main'
       });
-      const respostaBackend = await fetch(`${API_BASE}/api/Atualizacoes/mais-recente?${params.toString()}`);
+      const respostaBackend = await motoristaFetch(`${API_BASE}/api/Atualizacoes/mais-recente?${params.toString()}`);
       const dadosBackend = respostaBackend.ok ? await respostaBackend.json() : null;
       const existeAtualizacaoBackend = Boolean(dadosBackend?.atualizacaoDisponivel);
 
@@ -245,10 +247,11 @@ export default function Radar() {
   // --- NOVA FUNÇÃO DE SAIR (LOGOUT) ---
   const finalizarLogout = async () => {
     try {
+      await AppOverlay.stopRideMonitor();
       const token = await AsyncStorage.getItem('tokenMotorista');
 
       if (token) {
-        fetch(`${API_BASE}/api/Motorista/alterar-status-online`, {
+        motoristaFetch(`${API_BASE}/api/Motorista/alterar-status-online`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -258,6 +261,7 @@ export default function Radar() {
         }).catch(() => {});
       }
 
+      await encerrarSessao();
       await AsyncStorage.multiRemove([
         'tokenMotorista',
         'nomeMotorista',
@@ -337,7 +341,7 @@ export default function Radar() {
 
       const mesAtual = new Date().getMonth() + 1; 
       
-      const resposta = await fetch(`${API_BASE}/api/Motorista/financeiro?filtro=hoje&mes=${mesAtual}`, {
+      const resposta = await motoristaFetch(`${API_BASE}/api/Motorista/financeiro?filtro=hoje&mes=${mesAtual}`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -362,7 +366,7 @@ export default function Radar() {
       const token = await AsyncStorage.getItem('tokenMotorista');
       if (!token) return false;
 
-      const resposta = await fetch(`${API_BASE}/api/Corrida/ativa`, {
+      const resposta = await motoristaFetch(`${API_BASE}/api/Corrida/ativa`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -396,12 +400,56 @@ export default function Radar() {
     return false;
   };
 
+  const filaConhecidaRef = useRef(new Set<number>());
+  const sincronizandoRef = useRef(false);
+  const consultarFila = async () => {
+    const res = await motoristaFetch('/api/Corrida/fila');
+    if (!res.ok) return;
+    const fila: { id: number }[] = await res.json();
+    const nova = fila.some(c => !filaConhecidaRef.current.has(c.id));
+    filaConhecidaRef.current = new Set(fila.map(c => c.id));
+    setTemCorridaAoFinalizar(fila.length > 0);
+    if (nova && Platform.OS !== 'android') tocarBuzina();
+  };
+  const sincronizarJornada = async () => {
+    if (sincronizandoRef.current || estadoAppRef.current !== 'active') return;
+    sincronizandoRef.current = true;
+    try {
+      await consultarFila();
+      const res = await motoristaFetch('/api/Motorista/jornada');
+      if (!res.ok) return;
+      const jornada = await res.json();
+      if (!jornada.podeReceber && !jornada.podeContinuar && statusOnlineRef.current) {
+        await motoristaFetch('/api/Motorista/alterar-status-online', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: 'false' });
+        statusOnlineRef.current = false; setStatusOnline(false);
+        setCorridaRecebida(null); setCorridaAceita(false); setCorridasDisponiveis([]);
+        const mensagem = jornada.mensagem || 'Seu radar está indisponível. Fale com a agência.';
+        if (Platform.OS === 'web') setMensagemAvisoWeb(mensagem); else Alert.alert('Horário de atuação', mensagem);
+      } else if (jornada.podeContinuar) {
+        await verificarCorridaAtiva();
+      } else if (corridaAceitaRef.current) {
+        setCorridaAceita(false); corridaAceitaRef.current = false; setCorridaRecebida(null);
+      }
+      if (jornada.podeReceber && !jornada.podeContinuar && statusOnlineRef.current && filaConhecidaRef.current.size) {
+        await motoristaFetch('/api/Corrida/retomar-fila', { method: 'POST' });
+        await verificarCorridaAtiva();
+      }
+    } catch { /* A consulta seguinte recupera após a conexão voltar. */ }
+    finally { sincronizandoRef.current = false; }
+  };
+
+  useEffect(() => {
+    sincronizarJornada();
+    const timer = setInterval(sincronizarJornada, 15000);
+    return () => clearInterval(timer);
+  }, []);
+
   const buscarNotificacoesSuporteMotorista = async () => {
     try {
       const token = await AsyncStorage.getItem('tokenMotorista');
       if (!token) return;
 
-      const resposta = await fetch(`${API_BASE}/api/Suporte/minhas-respostas`, {
+      const resposta = await motoristaFetch(`${API_BASE}/api/Suporte/minhas-respostas`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -453,6 +501,7 @@ export default function Radar() {
 
   useEffect(() => {
     statusOnlineRef.current = statusOnline;
+    AsyncStorage.setItem('radarAtivoMotorista', String(statusOnline));
   }, [statusOnline]);
 
   useEffect(() => {
@@ -463,6 +512,7 @@ export default function Radar() {
       if (estado === 'active') {
         atualizarContadorCorridaDirecionada();
         verificarAtualizacaoApp();
+        sincronizarJornada();
       }
 
       if (estado === 'active') {
@@ -485,10 +535,6 @@ export default function Radar() {
 
     const sincronizarMonitorNativo = async () => {
       try {
-        if (!statusOnline) {
-          await AppOverlay.stopRideMonitor();
-          return;
-        }
 
         const token = await AsyncStorage.getItem('tokenMotorista');
         if (cancelado) return;
@@ -496,7 +542,7 @@ export default function Radar() {
         if (token) {
           await solicitarPermissaoNotificacaoAndroid();
           await AppOverlay.setRideMonitorForeground(estadoAppRef.current === 'active');
-          await AppOverlay.startRideMonitor(token, API_BASE);
+          await AppOverlay.startRideMonitor(token, API_BASE, (await obterRefreshToken()) || '', statusOnline);
         } else {
           await AppOverlay.stopRideMonitor();
         }
@@ -525,7 +571,7 @@ export default function Radar() {
 
         setLocalizacaoMotorista(localizacaoAtual);
 
-        await fetch(`${API_BASE}/api/Motorista/atualizar-localizacao`, {
+        await motoristaFetch(`${API_BASE}/api/Motorista/atualizar-localizacao`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -538,7 +584,7 @@ export default function Radar() {
         });
       } catch (erroLocalizacao) {
         // Fallback: mantém o sinal de vida pelo status online, mesmo se o GPS falhar por alguns segundos.
-        await fetch(`${API_BASE}/api/Motorista/alterar-status-online`, {
+        await motoristaFetch(`${API_BASE}/api/Motorista/alterar-status-online`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -582,7 +628,7 @@ export default function Radar() {
           if (statusOnlineRef.current) {
             try {
               const token = await AsyncStorage.getItem('tokenMotorista');
-              await fetch(`${API_BASE}/api/Motorista/atualizar-localizacao`, {
+              await motoristaFetch(`${API_BASE}/api/Motorista/atualizar-localizacao`, {
                 method: 'POST',
                 headers: { 
                   'Content-Type': 'application/json',
@@ -683,34 +729,32 @@ export default function Radar() {
   }, [corridaRecebida]);
 
   useEffect(() => {
-    if (statusOnline && !corridaRecebida) {
-      Animated.loop(
-        Animated.timing(animacaoRadar, {
-          toValue: 1,
-          duration: 1500,
-          easing: Easing.out(Easing.ease),
-          useNativeDriver: true,
-        })
-      ).start();
-    } else {
-      animacaoRadar.setValue(0);
-    }
-  }, [statusOnline, corridaRecebida]);
+    animacaoRadar.stopAnimation();
+    animacaoRadar.setValue(0);
+    if (!statusOnline || corridaRecebida || modoVisualizacao !== 'radar') return;
+    const ciclo = Animated.loop(Animated.timing(animacaoRadar, {
+      toValue: 1, duration: 1500, easing: Easing.out(Easing.ease), useNativeDriver: true,
+    }));
+    ciclo.start();
+    return () => { ciclo.stop(); animacaoRadar.stopAnimation(); };
+  }, [animacaoRadar, statusOnline, corridaRecebida, modoVisualizacao]);
 
   useEffect(() => {
     const conexao = new signalR.HubConnectionBuilder()
-      .withUrl(`${API_BASE}/hub-corridas`)
+      .withUrl(`${API_BASE}/hub-corridas`, { accessTokenFactory: async () => (await obterTokenMotorista()) || '' })
       .withAutomaticReconnect()
       .build();
 
-    conexao.start()
-      .then(async () => {
-        const idMotorista = await AsyncStorage.getItem('idMotorista');
-        if (idMotorista) {
-          await conexao.invoke('EntrarNoGrupoMotorista', idMotorista);
-        }
-      })
-      .catch(() => {});
+    conexao.onreconnected(() => { verificarCorridaAtiva(); buscarNotificacoesSuporteMotorista(); });
+    conexao.on('EtapaCorridaAtualizada', () => { verificarCorridaAtiva(); });
+    let encerrada = false;
+    let tentativa: ReturnType<typeof setTimeout> | undefined;
+    const conectar = async () => {
+      try { await conexao.start(); if (!encerrada) sincronizarJornada(); }
+      catch { if (!encerrada) tentativa = setTimeout(conectar, 5000); }
+    };
+    conexao.onclose(() => { if (!encerrada) tentativa = setTimeout(conectar, 5000); });
+    conectar();
 
     conexao.on("NovaCorridaDisponivel", () => {
       setSinalNovaCorrida(gatilho => gatilho + 1);
@@ -723,6 +767,7 @@ export default function Radar() {
     });
 
     conexao.on("CorridaDirecionadaAguardando", () => {
+      consultarFila().catch(() => {});
       setTemCorridaAoFinalizar(true);
       buscarNotificacoesSuporteMotorista();
     });
@@ -731,8 +776,9 @@ export default function Radar() {
       setSinalNovaCorrida(gatilho => gatilho + 1);
     });
 
-    conexao.on("RespostaSuporteRecebida", () => {
+    conexao.on("RespostaSuporteRecebida", (payload: any) => {
       buscarNotificacoesSuporteMotorista();
+      AppOverlay.notifyMessage("suporte-" + payload.id, "Resposta de suporte", payload.respostaAgencia || "Sua agência respondeu.").catch(() => {});
     });
 
 
@@ -779,8 +825,8 @@ export default function Radar() {
       }
     });
 
-    return () => { 
-        conexao.stop(); 
+    return () => {
+      encerrada = true; clearTimeout(tentativa); conexao.stop();
     }; 
   }, []);
 
@@ -792,7 +838,7 @@ export default function Radar() {
 
       try {
         const token = await AsyncStorage.getItem('tokenMotorista'); 
-        const resposta = await fetch(`${API_BASE}/api/Corrida/pendentes`, {
+        const resposta = await motoristaFetch(`${API_BASE}/api/Corrida/pendentes`, {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${token}` 
@@ -885,7 +931,7 @@ export default function Radar() {
     }
 
     try {
-      const resposta = await fetch(`${API_BASE}/api/Motorista/alterar-status-online`, {
+      const resposta = await motoristaFetch(`${API_BASE}/api/Motorista/alterar-status-online`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -905,6 +951,8 @@ export default function Radar() {
 
         if (novoStatus) {
           await enviarSinalDeVida();
+          await motoristaFetch('/api/Corrida/retomar-fila', { method: 'POST' });
+          await verificarCorridaAtiva();
         }
       } else {
         const textoErro = await resposta.text();
@@ -914,7 +962,7 @@ export default function Radar() {
         } catch {
           if (textoErro) mensagemErro = textoErro;
         }
-        Alert.alert("Erro", mensagemErro);
+        if (Platform.OS === 'web') setMensagemAvisoWeb(mensagemErro); else Alert.alert("Erro", mensagemErro);
       }
     } catch (erro) {
       Alert.alert("Erro", "Sem conexão.");
@@ -938,7 +986,7 @@ export default function Radar() {
     try {
       const token = await AsyncStorage.getItem('tokenMotorista');
       
-      const resposta = await fetch(`${API_BASE}/api/Corrida/aceitar/${corridaAlvo.id}`, {
+      const resposta = await motoristaFetch(`${API_BASE}/api/Corrida/aceitar/${corridaAlvo.id}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -946,7 +994,7 @@ export default function Radar() {
       });
 
       if (resposta.ok) {
-        setCorridaRecebida(corridaAlvo); // Fixa a corrida para o app saber qual está ativa
+        setCorridaRecebida({ ...corridaAlvo, etapa: 'Busca' }); // Fixa a corrida para o app saber qual está ativa
         setCorridaAceita(true); 
         setCorridasDisponiveis([]); // Limpa a lista
       } else {
@@ -960,6 +1008,24 @@ export default function Radar() {
     }
   };
 
+  const confirmarEtapa = async () => {
+    if (!corridaRecebida || alterandoEtapa) return;
+    if (corridaRecebida.etapa === 'Destino') { await finalizarCorridaReal(); return; }
+    setAlterandoEtapa(true);
+    try {
+      const resposta = await motoristaFetch('/api/Corrida/embarcar/' + corridaRecebida.id, { method: 'POST' });
+      if (!resposta.ok) {
+        const dados = await resposta.json().catch(() => ({}));
+        throw new Error(dados.mensagem || 'Não foi possível confirmar o embarque.');
+      }
+      const dados = await resposta.json();
+      setCorridaRecebida((atual: any) => atual?.id === corridaRecebida.id ? { ...atual, ...dados } : atual);
+    } catch (erro) {
+      const mensagem = erro instanceof Error ? erro.message : 'Sem conexão. Tente novamente.';
+      if (Platform.OS === 'web') setMensagemAvisoWeb(mensagem); else Alert.alert('Embarque', mensagem);
+    } finally { setAlterandoEtapa(false); }
+  };
+
   const pedirConfirmacaoFinalizacao = () => {
     if (!corridaRecebida) return;
 
@@ -969,24 +1035,25 @@ export default function Radar() {
     }
 
     Alert.alert(
-      "Finalizar corrida",
-      "Tem certeza que deseja finalizar esta corrida?",
+      corridaRecebida.etapa === 'Destino' ? 'Finalizar corrida' : 'Confirmar embarque',
+      corridaRecebida.etapa === 'Destino' ? 'O passageiro chegou ao destino?' : 'O passageiro já está na moto? Isso conclui a etapa de busca.',
       [
         { text: "Cancelar", style: "cancel" },
         {
-          text: "Finalizar",
-          style: "destructive",
-          onPress: finalizarCorridaReal
+          text: 'Confirmar',
+          onPress: confirmarEtapa
         }
       ]
     );
   };
 
   const finalizarCorridaReal = async () => {
+    if (alterandoEtapa) return;
+    setAlterandoEtapa(true);
     try {
       const token = await AsyncStorage.getItem('tokenMotorista');
       
-      const resposta = await fetch(`${API_BASE}/api/Corrida/finalizar/${corridaRecebida.id}`, {
+      const resposta = await motoristaFetch(`${API_BASE}/api/Corrida/finalizar/${corridaRecebida.id}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -997,7 +1064,9 @@ export default function Radar() {
         const dadosResposta = await resposta.json().catch(() => ({}));
         setValorDiario(prev => prev + corridaRecebida.valor);
         setTemCorridaAoFinalizar(false);
-
+        if (dadosResposta.foraDoHorario) {
+          setStatusOnline(false); statusOnlineRef.current = false;
+        }
         setTempoRestante(15);
         setSinalNovaCorrida(gatilho => gatilho + 1);
 
@@ -1017,7 +1086,7 @@ export default function Radar() {
       }
     } catch (erro) {
       Alert.alert("Erro", "Sem conexão.");
-    }
+    } finally { setAlterandoEtapa(false); }
   };
 
   const abrirGPS = (app: string, enderecoParaIr: string) => {
@@ -1191,9 +1260,9 @@ export default function Radar() {
         >
           <View style={styles.fundoConfirmacaoWeb}>
             <View style={styles.caixaConfirmacaoWeb}>
-              <Text style={styles.tituloConfirmacaoWeb}>Finalizar corrida</Text>
+              <Text style={styles.tituloConfirmacaoWeb}>{corridaRecebida?.etapa === 'Destino' ? 'Finalizar corrida' : 'Confirmar embarque'}</Text>
               <Text style={styles.textoConfirmacaoWeb}>
-                Tem certeza que deseja finalizar esta corrida?
+                {corridaRecebida?.etapa === 'Destino' ? 'O passageiro chegou ao destino?' : 'O passageiro já está na moto?'}
               </Text>
 
               <View style={styles.botoesConfirmacaoWeb}>
@@ -1208,10 +1277,10 @@ export default function Radar() {
                   style={styles.botaoSairConfirmacaoWeb}
                   onPress={async () => {
                     setConfirmarFinalizacaoWeb(false);
-                    await finalizarCorridaReal();
+                    await confirmarEtapa();
                   }}
                 >
-                  <Text style={styles.textoSairConfirmacaoWeb}>Finalizar</Text>
+                  <Text style={styles.textoSairConfirmacaoWeb}>Confirmar</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1380,7 +1449,7 @@ export default function Radar() {
         {statusOnline && corridaRecebida && corridaAceita && !avisoCorridaDirecionada.ativo && (
           <View style={styles.cartaoEmCorrida}>
             <View style={styles.cabecalhoEmCorrida}>
-              <Text style={[styles.tituloEmCorrida, { color: temaAgencia.corPrimaria }]}>🚀 EM CORRIDA</Text>
+              <Text style={[styles.tituloEmCorrida, { color: temaAgencia.corPrimaria }]}>{corridaRecebida.etapa === 'Destino' ? '🏁 LEVANDO PASSAGEIRO' : '📍 BUSCANDO PASSAGEIRO'}</Text>
               <Text style={[styles.valorDestaque, { color: temaAgencia.corPrimaria }]}>R$ {corridaRecebida.valor.toFixed(2)}</Text>
             </View>
 
@@ -1389,7 +1458,7 @@ export default function Radar() {
             </View>
 
             <View style={styles.blocoEndereco}>
-              <Text style={styles.tituloBloco}>📍 BUSCAR EM:</Text>
+              <Text style={styles.tituloBloco}>{corridaRecebida.etapa === 'Destino' ? '✓ BUSCA CONCLUÍDA' : '1 · BUSCAR EM:'}</Text>
               <Text style={styles.enderecoTexto}>{corridaRecebida.busca}</Text>
               <Text style={styles.distanciaTextoCompacta}>{formatarQuilometragem(corridaRecebida.distanciaBusca)}</Text>
               <View style={styles.botoesGpsLinha}>
@@ -1405,7 +1474,7 @@ export default function Radar() {
             <View style={styles.divisor} />
 
             <View style={styles.blocoEndereco}>
-              <Text style={styles.tituloBloco}>🏁 LEVAR PARA:</Text>
+              <Text style={styles.tituloBloco}>2 · LEVAR PARA:</Text>
               <Text style={styles.enderecoTexto}>{corridaRecebida.destino}</Text>
               <Text style={styles.distanciaTextoCompacta}>{formatarQuilometragem(corridaRecebida.distanciaDestino)}</Text>
               <View style={styles.botoesGpsLinha}>
@@ -1418,8 +1487,8 @@ export default function Radar() {
               </View>
             </View>
 
-            <TouchableOpacity style={[styles.btnFinalizarTotal, { backgroundColor: temaAgencia.corPrimaria }]} onPress={pedirConfirmacaoFinalizacao}>
-              <Text style={styles.btnTextoBranco}>FINALIZAR CORRIDA</Text>
+            <TouchableOpacity style={[styles.btnFinalizarTotal, { backgroundColor: temaAgencia.corPrimaria }]} disabled={alterandoEtapa} onPress={pedirConfirmacaoFinalizacao}>
+              <Text style={styles.btnTextoBranco}>{alterandoEtapa ? 'SALVANDO...' : corridaRecebida.etapa === 'Destino' ? 'FINALIZAR CORRIDA' : 'PASSAGEIRO EMBARCOU · CONCLUIR BUSCA'}</Text>
             </TouchableOpacity>
 
             {temCorridaAoFinalizar && (
@@ -1641,7 +1710,7 @@ const styles = StyleSheet.create({
   cabecalhoModal: { flexDirection: 'row', justifyContent: 'space-between', padding: 20, backgroundColor: '#28a745', alignItems: 'center' },
   tituloModal: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
   textoVazio: { textAlign: 'center', marginTop: 50, fontSize: 16, color: '#666' },
-  conteudoRadar: { padding: 20, paddingTop: 45, alignItems: 'center', paddingBottom: 40 },
+  conteudoRadar: { padding: 20, paddingTop: 45, alignItems: 'center', paddingBottom: 110 },
   areaBotaoStatus: { width: '100%', alignItems: 'center', marginBottom: 20 },
   statusTexto: { fontSize: 14, fontWeight: 'bold', color: '#888' },
   cartaoCorrida: { backgroundColor: '#fff', width: '100%', borderRadius: 15, padding: 20, elevation: 8, marginBottom: 20 },

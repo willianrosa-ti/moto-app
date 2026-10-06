@@ -21,12 +21,14 @@ type AppOverlayNativeModule = {
   showOverlay: (label: string) => Promise<void>;
   hideOverlay: () => Promise<void>;
   playBuzina: () => Promise<void>;
-  startRideMonitor: (token: string, apiBase: string) => Promise<void>;
+  startRideMonitor: (token: string, apiBase: string, refreshToken: string, radarAtivo: boolean) => Promise<void>;
+  notifyMessage: (id: string, title: string, text: string) => Promise<void>;
   stopRideMonitor: () => Promise<void>;
   setRideMonitorForeground: (appEmPrimeiroPlano: boolean) => Promise<void>;
 };
 
 const moduloNativo = NativeModules.AppOverlay as AppOverlayNativeModule | undefined;
+const mensagensNotificadas = new Set<string>();
 
 const AppOverlay = {
   async isSupported() {
@@ -73,9 +75,28 @@ const AppOverlay = {
     return true;
   },
 
-  async startRideMonitor(token: string, apiBase: string) {
+  async startRideMonitor(token: string, apiBase: string, refreshToken = '', radarAtivo = true) {
     if (Platform.OS !== 'android' || !moduloNativo) return;
-    await moduloNativo.startRideMonitor(token, apiBase);
+    await moduloNativo.startRideMonitor(token, apiBase, refreshToken, radarAtivo);
+  },
+
+  async notifyMessage(id: string, title: string, text: string) {
+    if (Platform.OS === 'android' && moduloNativo?.notifyMessage) {
+      await moduloNativo.notifyMessage(id, title, text);
+    } else if (Platform.OS === 'web' && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      if (mensagensNotificadas.has(id)) return;
+      const destino = id.startsWith('suporte-') ? '/radar/notificacoes' : '/radar?chat=1';
+      const registration = await navigator.serviceWorker?.getRegistration();
+      if (registration) {
+        const tag = `chat-${id}`;
+        if (!(await registration.getNotifications({ tag })).length) await registration.showNotification(title, { body: text, tag, data: { url: destino } });
+      } else {
+        const aviso = new Notification(title, { body: text, tag: `chat-${id}` });
+        aviso.onclick = () => { window.focus(); window.location.assign(destino); aviso.close(); };
+      }
+      mensagensNotificadas.add(id);
+      if (mensagensNotificadas.size > 500) mensagensNotificadas.delete(mensagensNotificadas.values().next().value!);
+    }
   },
 
   async stopRideMonitor() {

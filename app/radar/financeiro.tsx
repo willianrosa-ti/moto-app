@@ -1,3 +1,4 @@
+import { motoristaFetch } from '../../services/motoristaApi';
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, StatusBar } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -86,7 +87,7 @@ export default function FinanceiroMotorista() {
       const url = `${API_BASE}/api/Motorista/financeiro?filtro=${filtro}&mes=${mesParaEnviar}`;
 
       // 3. Faz a chamada passando o Token no cabeçalho
-      const resposta = await fetch(url, {
+      const resposta = await motoristaFetch(url, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,

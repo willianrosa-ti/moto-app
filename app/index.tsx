@@ -1,3 +1,4 @@
+import { salvarSessao, obterTokenMotorista } from '../services/motoristaApi';
 import { useState, useEffect } from 'react';
 import {
   StyleSheet,
@@ -53,7 +54,7 @@ export default function LoginMotorista() {
   useEffect(() => {
     const verificarLoginSalvo = async () => {
       try {
-        const token = await AsyncStorage.getItem('tokenMotorista');
+        const token = await obterTokenMotorista();
         const manter = await AsyncStorage.getItem('manterConectadoMotorista');
 
         if (token && manter === 'true') {
@@ -61,6 +62,10 @@ export default function LoginMotorista() {
         }
       } catch (erro) {
         console.error('Erro ao verificar login salvo:', erro);
+        // Sem rede, conserva o acesso salvo; o radar retenta a renovação quando a conexão voltar.
+        const manter = await AsyncStorage.getItem('manterConectadoMotorista');
+        const tokenSalvo = await AsyncStorage.getItem('tokenMotorista');
+        if (manter === 'true' && tokenSalvo) router.replace('/radar');
       }
     };
 
@@ -94,6 +99,7 @@ export default function LoginMotorista() {
           telefone: telefone.trim(),
           placaMoto: placa.trim().toUpperCase(),
           senha: senha,
+          manterConectado,
         }),
       });
 
@@ -127,7 +133,7 @@ export default function LoginMotorista() {
         return;
       }
 
-      await AsyncStorage.setItem('tokenMotorista', dados.token);
+      await salvarSessao(dados);
       await AsyncStorage.setItem('nomeMotorista', dados.motorista.nome || '');
       await AsyncStorage.setItem('idMotorista', String(dados.motorista.id));
       await AsyncStorage.setItem(

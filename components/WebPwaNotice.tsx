@@ -1,3 +1,4 @@
+import { motoristaFetch } from '../services/motoristaApi';
 import { useEffect, useState } from 'react';
 import { Alert, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -111,7 +112,7 @@ export default function WebPwaNotice({ corPrimaria }: Props) {
         return;
       }
 
-      const respostaChave = await fetch(`${API_BASE}/api/Motorista/web-push-public-key`, {
+      const respostaChave = await motoristaFetch(`${API_BASE}/api/Motorista/web-push-public-key`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -145,7 +146,7 @@ export default function WebPwaNotice({ corPrimaria }: Props) {
         applicationServerKey: converterBase64UrlParaUint8Array(chavePublica),
       });
 
-      const resposta = await fetch(`${API_BASE}/api/Motorista/web-push-subscription`, {
+      const resposta = await motoristaFetch(`${API_BASE}/api/Motorista/web-push-subscription`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,

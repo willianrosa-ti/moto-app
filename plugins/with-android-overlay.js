@@ -9,7 +9,7 @@ const PERMISSOES_ANDROID = [
   'android.permission.ACCESS_FINE_LOCATION',
   'android.permission.ACCESS_BACKGROUND_LOCATION',
   'android.permission.FOREGROUND_SERVICE',
-  'android.permission.FOREGROUND_SERVICE_DATA_SYNC',
+  'android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING',
   'android.permission.FOREGROUND_SERVICE_LOCATION',
   'android.permission.POST_NOTIFICATIONS',
   'android.permission.USE_FULL_SCREEN_INTENT',
@@ -44,7 +44,7 @@ function adicionarServicoMonitor(manifest) {
   const atributos = {
     'android:name': nomeServico,
     'android:exported': 'false',
-    'android:foregroundServiceType': 'dataSync|location',
+    'android:foregroundServiceType': 'remoteMessaging|location',
   };
 
   if (existente) {
@@ -171,6 +171,9 @@ function copiarServicoMonitor(projectRoot) {
   if (!fs.existsSync(origem)) return;
 
   escreverArquivo(projectRoot, 'RideMonitorService.java', fs.readFileSync(origem, 'utf8'));
+  for (const nome of ['DriverNotifications.java', 'DriverSessionSecrets.java']) {
+    escreverArquivo(projectRoot, nome, fs.readFileSync(path.join(__dirname, 'native', nome), 'utf8'));
+  }
 }
 
 function criarModuloOverlay(projectRoot) {
@@ -348,7 +351,7 @@ public class AppOverlayModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
-    public void startRideMonitor(String token, String apiBase, Promise promise) {
+    public void startRideMonitor(String token, String apiBase, String refreshToken, boolean radarAtivo, Promise promise) {
         if (token == null || token.trim().isEmpty()) {
             promise.reject("E_RIDE_MONITOR_TOKEN", "Token do motorista indisponivel.");
             return;
@@ -359,6 +362,8 @@ public class AppOverlayModule extends ReactContextBaseJavaModule {
             intent.setAction(RideMonitorService.ACTION_START);
             intent.putExtra(RideMonitorService.EXTRA_TOKEN, token);
             intent.putExtra(RideMonitorService.EXTRA_API_BASE, apiBase);
+            intent.putExtra("refreshToken", refreshToken);
+            intent.putExtra("radarAtivo", radarAtivo);
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 reactContext.startForegroundService(intent);
@@ -388,6 +393,12 @@ public class AppOverlayModule extends ReactContextBaseJavaModule {
     public void setRideMonitorForeground(boolean appEmPrimeiroPlano, Promise promise) {
         RideMonitorService.setAppInForeground(appEmPrimeiroPlano);
         promise.resolve(null);
+    }
+
+    @ReactMethod
+    public void notifyMessage(String id, String title, String text, Promise promise) {
+        try { DriverNotifications.show(reactContext, id, title, text); promise.resolve(null); }
+        catch (Exception error) { promise.reject("E_MESSAGE_NOTIFICATION", error); }
     }
 
     private boolean temPermissaoSobreposicao() {

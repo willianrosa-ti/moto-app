@@ -1,3 +1,4 @@
+import { motoristaFetch } from '../../services/motoristaApi';
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, StatusBar, Alert, Platform, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -94,7 +95,7 @@ export default function NotificacoesAgencia() {
 
   const marcarComoLidas = async (token: string) => {
     try {
-      await fetch(`${API_BASE}/api/Suporte/marcar-lidas-motorista`, {
+      await motoristaFetch(`${API_BASE}/api/Suporte/marcar-lidas-motorista`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -117,7 +118,7 @@ export default function NotificacoesAgencia() {
         return;
       }
 
-      const resposta = await fetch(`${API_BASE}/api/Suporte/minhas-respostas`, {
+      const resposta = await motoristaFetch(`${API_BASE}/api/Suporte/minhas-respostas`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -161,7 +162,7 @@ export default function NotificacoesAgencia() {
         versaoAtual: VERSAO_APP_MOTORISTA,
         canal: 'main'
       });
-      const respostaBackend = await fetch(`${API_BASE}/api/Atualizacoes/mais-recente?${params.toString()}`);
+      const respostaBackend = await motoristaFetch(`${API_BASE}/api/Atualizacoes/mais-recente?${params.toString()}`);
       const dadosBackend = respostaBackend.ok ? await respostaBackend.json() : null;
       const novaAtualizacaoBackend = dadosBackend?.atualizacaoDisponivel ? dadosBackend.atualizacao : null;
 
