@@ -1,4 +1,5 @@
 import { motoristaFetch } from '../../services/motoristaApi';
+import { buscarAvisos, observarAvisos, type AvisoMotorista } from '../../services/avisos';
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, StatusBar, Alert, Platform, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -52,6 +53,7 @@ export default function NotificacoesAgencia() {
 
   const [carregando, setCarregando] = useState(true);
   const [notificacoes, setNotificacoes] = useState<NotificacaoAgencia[]>([]);
+  const [avisos, setAvisos] = useState<AvisoMotorista[]>([]);
   const [temaAgencia, setTemaAgencia] = useState<TemaAgencia>(TEMA_AGENCIA_PADRAO);
   const [atualizacaoDisponivel, setAtualizacaoDisponivel] = useState(false);
   const [atualizandoApp, setAtualizandoApp] = useState(false);
@@ -125,6 +127,8 @@ export default function NotificacoesAgencia() {
           'Content-Type': 'application/json'
         }
       });
+
+      buscarAvisos().then(dados => setAvisos(dados.avisos)).catch(() => {});
 
       if (resposta.ok) {
         const dados = await resposta.json();
@@ -208,6 +212,8 @@ export default function NotificacoesAgencia() {
     verificarAtualizacaoApp();
   }, []);
 
+  useEffect(() => observarAvisos(aviso => setAvisos(lista => [aviso, ...lista.filter(a => a.id !== aviso.id)])), []);
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar backgroundColor={temaAgencia.corPrimaria} barStyle="light-content" />
@@ -257,12 +263,33 @@ export default function NotificacoesAgencia() {
             </View>
           )}
 
-          {notificacoes.length === 0 ? (
-            <View style={styles.cardVazio}>
-              <Ionicons name="notifications-off-outline" size={42} color="#999" />
-              <Text style={styles.tituloVazio}>Nenhuma resposta da agência</Text>
-              <Text style={styles.textoVazio}>Quando a agência responder uma solicitação de suporte, ela aparecerá aqui.</Text>
+          {avisos.length > 0 && <Text style={styles.tituloSecao}>Avisos da agência</Text>}
+          {avisos.map((aviso) => (
+            <View key={`aviso-${aviso.id}`} style={[styles.cardNotificacao, !aviso.vistoEm && styles.cardNaoLido, !aviso.vistoEm && { borderColor: temaAgencia.corPrimaria }]}>
+              <View style={styles.linhaTopoCard}>
+                <View style={[styles.tagProblema, { backgroundColor: '#fef3c7' }]}>
+                  <Text style={[styles.textoTagProblema, { color: '#b45309' }]}>Aviso</Text>
+                </View>
+                {!aviso.vistoEm && (
+                  <View style={styles.badgeNova}>
+                    <Text style={styles.textoBadgeNova}>NOVO</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.textoResposta} selectable>{aviso.texto}</Text>
+              <Text style={[styles.dataResposta, { marginTop: 10 }]}>Enviado em {formatarData(aviso.criadoEm)}</Text>
             </View>
+          ))}
+
+          {notificacoes.length > 0 && avisos.length > 0 && <Text style={styles.tituloSecao}>Respostas de suporte</Text>}
+          {notificacoes.length === 0 ? (
+            avisos.length === 0 && (
+              <View style={styles.cardVazio}>
+                <Ionicons name="notifications-off-outline" size={42} color="#999" />
+                <Text style={styles.tituloVazio}>Nenhuma notificação</Text>
+                <Text style={styles.textoVazio}>Avisos da agência e respostas de suporte aparecerão aqui.</Text>
+              </View>
+            )
           ) : (
             notificacoes.map((item) => (
               <View key={item.id} style={[styles.cardNotificacao, item.lidaPeloMotorista === false && styles.cardNaoLido, item.lidaPeloMotorista === false && { borderColor: temaAgencia.corPrimaria }]}>
@@ -399,6 +426,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#777',
     lineHeight: 20,
+  },
+  tituloSecao: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#4b5563',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 10,
+    marginTop: 4,
   },
   cardNotificacao: {
     backgroundColor: '#fff',

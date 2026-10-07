@@ -8,11 +8,11 @@ import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import Constants from 'expo-constants';
 import { useKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import * as Updates from 'expo-updates';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppStateStatus } from 'react-native';
-import { Alert, Animated, AppState, Easing, Linking, Modal, PermissionsAndroid, Platform, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
+import { Alert, Animated, AppState, Easing, Linking, Modal, PermissionsAndroid, Platform, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const ficheiroBuzina = require('../../assets/sounds/buzina.mp3');
@@ -132,9 +132,6 @@ export default function Radar() {
   const [valorDiario, setValorDiario] = useState<number>(0); 
   const [mostrarValor, setMostrarValor] = useState(false); 
 
-  // --- NOVOS ESTADOS PARA O MODO LISTA ---
-  const [modoVisualizacao, setModoVisualizacao] = useState<'radar' | 'lista'>('radar');
-  const [corridasDisponiveis, setCorridasDisponiveis] = useState<any[]>([]);
 
   // NOVO ESTADO: Controla a tela de carregamento/transição da MIL-LIN
   const [processandoAcesso, setProcessandoAcesso] = useState(false);
@@ -145,9 +142,12 @@ export default function Radar() {
   const corridaRecebidaRef = useRef<any>(null);
   const statusOnlineRef = useRef(false);
   const estadoAppRef = useRef<AppStateStatus>(AppState.currentState);
-  const qtdCorridasRef = useRef(0); // Referência para controlar o toque da buzina na lista
 
   const animacaoRadar = useRef(new Animated.Value(0)).current;
+  const [cicloAnimacao, setCicloAnimacao] = useState(0);
+  const [radarVisivel, setRadarVisivel] = useState(true);
+  const { width: larguraTela, height: alturaTela } = useWindowDimensions();
+  const tamanhoRadar = Math.min(larguraTela - 40, 340);
   const navegar = useRouter();
 
   const exibirAvisoCorridaDirecionada = (segundos = 5) => {
@@ -279,7 +279,6 @@ export default function Radar() {
       statusOnlineRef.current = false;
       setCorridaRecebida(null);
       setCorridaAceita(false);
-      setCorridasDisponiveis([]);
       setMenuAberto(false);
 
       if (Platform.OS === 'web') {
@@ -382,11 +381,9 @@ export default function Radar() {
           setCorridaAceita(true);      // Força o app a abrir a tela de "EM CORRIDA"
           setStatusOnline(true);       // Liga o radar para o GPS continuar rastreando
           statusOnlineRef.current = true;
-          setCorridasDisponiveis([]);
           setTemCorridaAoFinalizar(corrida?.temCorridaAoFinalizar === true);
 
           if (opcoes.mostrarAvisoDirecionada && corridaDirecionada) {
-            setModoVisualizacao('radar');
             exibirAvisoCorridaDirecionada(opcoes.segundos || 5);
           }
 
@@ -422,7 +419,7 @@ export default function Radar() {
       if (!jornada.podeReceber && !jornada.podeContinuar && statusOnlineRef.current) {
         await motoristaFetch('/api/Motorista/alterar-status-online', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: 'false' });
         statusOnlineRef.current = false; setStatusOnline(false);
-        setCorridaRecebida(null); setCorridaAceita(false); setCorridasDisponiveis([]);
+        setCorridaRecebida(null); setCorridaAceita(false);
         const mensagem = jornada.mensagem || 'Seu radar está indisponível. Fale com a agência.';
         if (Platform.OS === 'web') setMensagemAvisoWeb(mensagem); else Alert.alert('Horário de atuação', mensagem);
       } else if (jornada.podeContinuar) {
@@ -713,11 +710,11 @@ export default function Radar() {
 
   // Som para o modo RADAR
   useEffect(() => {
-    if (corridaRecebida && !corridaAceita && !avisoCorridaDirecionada.ativo && modoVisualizacao === 'radar') {
+    if (corridaRecebida && !corridaAceita && !avisoCorridaDirecionada.ativo) {
       setTempoRestante(15); 
       tocarBuzina();
     }
-  }, [corridaRecebida, modoVisualizacao, avisoCorridaDirecionada.ativo]);
+  }, [corridaRecebida, avisoCorridaDirecionada.ativo]);
 
   useEffect(() => {
     corridaAceitaRef.current = corridaAceita;
@@ -728,16 +725,31 @@ export default function Radar() {
     corridaRecebidaRef.current = corridaRecebida;
   }, [corridaRecebida]);
 
+  // Ao voltar de Financeiro, Notificações, Suporte etc. ou do segundo plano, a animação é recriada do zero
+  // (inclusive a View animada, pela key), para nunca ficar congelada.
+  useFocusEffect(useCallback(() => {
+    setRadarVisivel(true);
+    setCicloAnimacao(ciclo => ciclo + 1);
+    return () => setRadarVisivel(false);
+  }, []));
+
+  useEffect(() => {
+    const inscricao = AppState.addEventListener('change', (estado) => {
+      if (estado === 'active') setCicloAnimacao(ciclo => ciclo + 1);
+    });
+    return () => inscricao.remove();
+  }, []);
+
   useEffect(() => {
     animacaoRadar.stopAnimation();
     animacaoRadar.setValue(0);
-    if (!statusOnline || corridaRecebida || modoVisualizacao !== 'radar') return;
+    if (!radarVisivel || !statusOnline || corridaRecebida) return;
     const ciclo = Animated.loop(Animated.timing(animacaoRadar, {
-      toValue: 1, duration: 1500, easing: Easing.out(Easing.ease), useNativeDriver: true,
+      toValue: 1, duration: 2400, easing: Easing.linear, useNativeDriver: true,
     }));
     ciclo.start();
     return () => { ciclo.stop(); animacaoRadar.stopAnimation(); };
-  }, [animacaoRadar, statusOnline, corridaRecebida, modoVisualizacao]);
+  }, [animacaoRadar, radarVisivel, cicloAnimacao, statusOnline, corridaRecebida]);
 
   useEffect(() => {
     const conexao = new signalR.HubConnectionBuilder()
@@ -786,9 +798,6 @@ export default function Radar() {
       const corridaIdCancelada = payload?.corridaId;
 
       setSinalNovaCorrida(gatilho => gatilho + 1);
-      setCorridasDisponiveis((listaAtual) =>
-        listaAtual.filter((corrida) => corrida.id !== corridaIdCancelada)
-      );
 
       const corridaAtual = corridaRecebidaRef.current;
       if (corridaAtual && corridaAtual.id === corridaIdCancelada) {
@@ -812,7 +821,6 @@ export default function Radar() {
         statusOnlineRef.current = false;
         setCorridaRecebida(null);
         setCorridaAceita(false);
-        setCorridasDisponiveis([]);
         Alert.alert(
           "Conta suspensa",
           payload?.respostaAgencia || "Sua conta foi suspensa! Caso você não concorde, favor entrar em contato."
@@ -864,15 +872,6 @@ export default function Radar() {
               distanciaDestino: c.distanciaDestino || 0
             }));
 
-          // Atualiza o modo Lista
-          setCorridasDisponiveis(corridasValidas);
-
-          // Toca buzina sempre que o número de corridas novas for maior que o anterior (CORREÇÃO DA BUZINA)
-          if (modoVisualizacao === 'lista' && corridasValidas.length > qtdCorridasRef.current) {
-            tocarBuzina();
-          }
-          qtdCorridasRef.current = corridasValidas.length;
-
           // Atualiza o modo Radar (Sempre mantendo atualizado nos bastidores)
           setCorridaRecebida((atual: any) => {
             if (corridaAceitaRef.current) return atual;
@@ -898,20 +897,20 @@ export default function Radar() {
     }
 
     return () => clearInterval(intervaloVida);
-  }, [statusOnline, sinalNovaCorrida, modoVisualizacao]);
+  }, [statusOnline, sinalNovaCorrida]);
 
-  // Cronômetro apenas funciona no modo Radar
+  // Cronômetro para aceitar a chamada
   useEffect(() => {
     let timer: ReturnType<typeof setInterval>;
-    if (corridaRecebida && !corridaAceita && tempoRestante > 0 && modoVisualizacao === 'radar') {
+    if (corridaRecebida && !corridaAceita && tempoRestante > 0) {
       timer = setInterval(() => {
         setTempoRestante(prev => prev - 1);
       }, 1000);
-    } else if (corridaRecebida && !corridaAceita && tempoRestante === 0 && modoVisualizacao === 'radar') {
+    } else if (corridaRecebida && !corridaAceita && tempoRestante === 0) {
       recusarCorrida();
     }
     return () => clearInterval(timer);
-  }, [corridaRecebida, corridaAceita, tempoRestante, modoVisualizacao]);
+  }, [corridaRecebida, corridaAceita, tempoRestante]);
 
   const alternarStatus = async () => {
     const novoStatus = !statusOnline;
@@ -944,7 +943,6 @@ export default function Radar() {
         setStatusOnline(novoStatus);
         statusOnlineRef.current = novoStatus;
         setCorridaRecebida(null);
-        setCorridasDisponiveis([]); // Limpa a lista ao deslogar
         setCorridaAceita(false);
         corridasIgnoradas.current = []; 
         setTempoRestante(15);
@@ -996,7 +994,6 @@ export default function Radar() {
       if (resposta.ok) {
         setCorridaRecebida({ ...corridaAlvo, etapa: 'Busca' }); // Fixa a corrida para o app saber qual está ativa
         setCorridaAceita(true); 
-        setCorridasDisponiveis([]); // Limpa a lista
       } else {
         const erro = await resposta.text();
         Alert.alert("Ops!", erro); 
@@ -1099,8 +1096,17 @@ export default function Radar() {
   };
 
 
-  const sonarScale = animacaoRadar.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.5] });
-  const sonarOpacity = animacaoRadar.interpolate({ inputRange: [0, 1], outputRange: [0.8, 0] });
+  // Três ondas defasadas em 1/3 do ciclo, todas dirigidas pelo mesmo valor animado.
+  const interpolarOnda = (fase: number, inicio: number, fim: number) => {
+    if (fase === 0) return animacaoRadar.interpolate({ inputRange: [0, 1], outputRange: [inicio, fim] });
+    const corte = 1 - fase;
+    const pontoInicial = inicio + (fim - inicio) * fase;
+    return animacaoRadar.interpolate({ inputRange: [0, corte, corte + 0.0001, 1], outputRange: [pontoInicial, fim, inicio, pontoInicial] });
+  };
+  const ondasRadar = [0, 1 / 3, 2 / 3].map(fase => ({
+    escala: interpolarOnda(fase, 0.18, 1),
+    opacidade: interpolarOnda(fase, 0.55, 0),
+  }));
 
   // ==========================================
   // --- RENDERIZAÇÃO DA TELA DE CARREGAMENTO MIL-LIN ---
@@ -1314,35 +1320,13 @@ export default function Radar() {
       <ScrollView contentContainerStyle={styles.conteudoRadar}>
         <WebPwaNotice corPrimaria={temaAgencia.corPrimaria} />
 
-        {/* === BOTÕES DE CONTROLE RADAR / LISTA === */}
-        {statusOnline && !corridaAceita && !avisoCorridaDirecionada.ativo && (
-          <View style={styles.botoesModoContainer}>
-            <TouchableOpacity
-              style={[styles.botaoModo, modoVisualizacao === 'lista' && styles.botaoModoAtivo, modoVisualizacao === 'lista' && { backgroundColor: temaAgencia.corPrimaria }]}
-              onPress={() => setModoVisualizacao('lista')}
-            >
-              <Text style={[styles.textoBotaoModo, modoVisualizacao === 'lista' && styles.textoBotaoModoAtivo]}>Lista de Corridas</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.botaoModo, modoVisualizacao === 'radar' && styles.botaoModoAtivo, modoVisualizacao === 'radar' && { backgroundColor: temaAgencia.corPrimaria }]}
-              onPress={() => setModoVisualizacao('radar')}
-            >
-              <Text style={[styles.textoBotaoModo, modoVisualizacao === 'radar' && styles.textoBotaoModoAtivo]}>Radar</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* STATUS DA PROCURA (Exibe apenas no modo radar ou se estiver offline) */}
-        {(!corridaAceita && !avisoCorridaDirecionada.ativo && (modoVisualizacao === 'radar' || !statusOnline)) && (
+        {!statusOnline && (
           <View style={styles.areaBotaoStatus}>
-            <Text style={styles.statusTexto}>
-              {statusOnline ? 'Procurando corridas no Radar...' : 'Você está offline'}
-            </Text>
+            <Text style={styles.statusTexto}>Você está offline</Text>
           </View>
         )}
 
-        {/* === MODO LISTA === */}
+        {/* === CORRIDA DIRECIONADA === */}
         {statusOnline && avisoCorridaDirecionada.ativo && corridaRecebida ? (
           <View style={styles.cartaoCorridaDirecionada}>
             <View style={[styles.iconeDirecionada, { borderColor: temaAgencia.corPrimaria }]}>
@@ -1365,36 +1349,6 @@ export default function Radar() {
               Prepare-se para buscar o passageiro. A buzina continua ativa.
             </Text>
           </View>
-        ) : statusOnline && !corridaAceita && modoVisualizacao === 'lista' ? (
-          <View style={styles.listaContainer}>
-            {corridasDisponiveis.length === 0 ? (
-              <Text style={styles.textoVazioLista}>Buscando por novas chamadas...</Text>
-            ) : (
-              corridasDisponiveis.map((corrida) => (
-                <View key={corrida.id} style={styles.cardCorridaLista}>
-                  <View style={styles.cabecalhoLista}>
-                    <Text style={styles.nomePassageiroLista}>{corrida.passageiro}</Text>
-                    <Text style={styles.valorCorridaLista}>R$ {corrida.valor.toFixed(2)}</Text>
-                  </View>
-                  <View style={styles.enderecosLista}>
-                    <Text style={styles.enderecoTextoLista} numberOfLines={2}>🚗 Buscar em: {corrida.busca}</Text>
-                    <Text style={styles.quilometragemTextoLista}>{formatarQuilometragem(corrida.distanciaBusca)}</Text>
-
-                    <Text style={styles.enderecoTextoLista} numberOfLines={2}>📍 Levar para: {corrida.destino}</Text>
-                    <Text style={styles.quilometragemTextoLista}>{formatarQuilometragem(corrida.distanciaDestino)}</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={[styles.botaoAceitarLista, { backgroundColor: temaAgencia.corPrimaria }]}
-                    onPress={() => aceitarCorridaReal(corrida)}
-                  >
-                    <Text style={styles.textoBotaoAceitarLista}>ACEITAR CORRIDA</Text>
-                  </TouchableOpacity>
-                </View>
-              ))
-            )}
-          </View>
-
-        // === MODO RADAR ===
         ) : (
           <>
             {statusOnline && corridaRecebida && !corridaAceita && !avisoCorridaDirecionada.ativo && (
@@ -1434,18 +1388,27 @@ export default function Radar() {
             )}
 
             {statusOnline && !corridaRecebida && !avisoCorridaDirecionada.ativo && (
-              <View style={styles.radarBuscando}>
-                <Animated.View style={[
-                  styles.sonarWave, 
-                  { transform: [{ scale: sonarScale }], opacity: sonarOpacity }
-                ]} />
-                <Text style={[styles.textoBuscando, { color: "#46f371" }]}>Procurando passageiros...</Text>
+              <View style={[styles.radarBuscando, { minHeight: alturaTela * 0.55 }]}>
+                <View key={cicloAnimacao} style={[styles.radarArea, { width: tamanhoRadar, height: tamanhoRadar }]}>
+                  <View style={[styles.radarAnel, { width: tamanhoRadar, height: tamanhoRadar, borderRadius: tamanhoRadar / 2 }]} />
+                  <View style={[styles.radarAnel, { width: tamanhoRadar * 0.62, height: tamanhoRadar * 0.62, borderRadius: tamanhoRadar * 0.31 }]} />
+                  {ondasRadar.map((onda, indice) => (
+                    <Animated.View
+                      key={indice}
+                      style={[styles.sonarWave, { width: tamanhoRadar, height: tamanhoRadar, borderRadius: tamanhoRadar / 2, transform: [{ scale: onda.escala }], opacity: onda.opacidade }]}
+                    />
+                  ))}
+                  <View style={styles.radarCentro}>
+                    <Ionicons name="navigate" size={36} color="#fff" />
+                  </View>
+                </View>
+                <Text style={styles.textoBuscando}>Procurando passageiros...</Text>
               </View>
             )}
           </>
         )}
 
-        {/* === TELA: EM CORRIDA (Independente se veio do Radar ou Lista) === */}
+        {/* === TELA: EM CORRIDA === */}
         {statusOnline && corridaRecebida && corridaAceita && !avisoCorridaDirecionada.ativo && (
           <View style={styles.cartaoEmCorrida}>
             <View style={styles.cabecalhoEmCorrida}>
@@ -1488,7 +1451,7 @@ export default function Radar() {
             </View>
 
             <TouchableOpacity style={[styles.btnFinalizarTotal, { backgroundColor: temaAgencia.corPrimaria }]} disabled={alterandoEtapa} onPress={pedirConfirmacaoFinalizacao}>
-              <Text style={styles.btnTextoBranco}>{alterandoEtapa ? 'SALVANDO...' : corridaRecebida.etapa === 'Destino' ? 'FINALIZAR CORRIDA' : 'PASSAGEIRO EMBARCOU · CONCLUIR BUSCA'}</Text>
+              <Text style={styles.btnTextoBranco}>{alterandoEtapa ? 'SALVANDO...' : corridaRecebida.etapa === 'Destino' ? 'FINALIZAR CORRIDA' : 'PASSAGEIRO EMBARCADO'}</Text>
             </TouchableOpacity>
 
             {temCorridaAoFinalizar && (
@@ -1710,7 +1673,7 @@ const styles = StyleSheet.create({
   cabecalhoModal: { flexDirection: 'row', justifyContent: 'space-between', padding: 20, backgroundColor: '#28a745', alignItems: 'center' },
   tituloModal: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
   textoVazio: { textAlign: 'center', marginTop: 50, fontSize: 16, color: '#666' },
-  conteudoRadar: { padding: 20, paddingTop: 45, alignItems: 'center', paddingBottom: 110 },
+  conteudoRadar: { flexGrow: 1, padding: 20, paddingTop: 45, alignItems: 'center', paddingBottom: 110 },
   areaBotaoStatus: { width: '100%', alignItems: 'center', marginBottom: 20 },
   statusTexto: { fontSize: 14, fontWeight: 'bold', color: '#888' },
   cartaoCorrida: { backgroundColor: '#fff', width: '100%', borderRadius: 15, padding: 20, elevation: 8, marginBottom: 20 },
@@ -1816,110 +1779,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     lineHeight: 19,
   },
-  radarBuscando: { marginTop: 50, alignItems: 'center' },
-  sonarWave: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#00e676', marginBottom: 20 },
-  textoBuscando: { color: '#00e676', fontWeight: 'bold', fontSize: 16 },
-
-  // --- NOVOS ESTILOS PARA OS BOTÕES (LISTA/RADAR) ---
-  botoesModoContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    width: '100%',
-    marginBottom: 25,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 30,
-    padding: 5,
-  },
-  botaoModo: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 25,
-    alignItems: 'center',
-  },
-  botaoModoAtivo: {
-    backgroundColor: '#28a745',
-    elevation: 3,
-  },
-  textoBotaoModo: {
-    color: '#888',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  textoBotaoModoAtivo: {
-    color: '#fff',
-  },
-
-  // --- NOVOS ESTILOS PARA OS CARDS DA LISTA ---
-  listaContainer: {
-    width: '100%',
-    paddingBottom: 10,
-  },
-  textoVazioLista: {
-    textAlign: 'center',
-    color: '#888',
-    marginTop: 20,
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  cardCorridaLista: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 15,
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#eee',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-  },
-  cabecalhoLista: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-    paddingBottom: 10,
-    marginBottom: 10,
-  },
-  nomePassageiroLista: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  valorCorridaLista: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#00c853',
-  },
-  enderecosLista: {
-    marginBottom: 15,
-    gap: 6,
-  },
-  enderecoTextoLista: {
-    fontSize: 14,
-    color: '#555',
-    fontWeight: '600',
-  },
-  quilometragemTextoLista: {
-    fontSize: 13,
-    color: '#007bff',
-    fontWeight: '700',
-    marginBottom: 6,
-    marginLeft: 18,
-  },
-  botaoAceitarLista: {
-    backgroundColor: '#00c853',
-    padding: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  textoBotaoAceitarLista: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 15,
-  },
+  radarBuscando: { flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center', gap: 28, paddingVertical: 10 },
+  radarArea: { alignItems: 'center', justifyContent: 'center' },
+  radarAnel: { position: 'absolute', borderWidth: 1.5, borderColor: 'rgba(0, 200, 83, 0.28)' },
+  sonarWave: { position: 'absolute', backgroundColor: '#00c853' },
+  radarCentro: { width: 84, height: 84, borderRadius: 42, backgroundColor: '#00c853', alignItems: 'center', justifyContent: 'center', elevation: 6, shadowColor: '#00c853', shadowOpacity: 0.45, shadowRadius: 14, shadowOffset: { width: 0, height: 4 } },
+  textoBuscando: { color: '#00a344', fontWeight: 'bold', fontSize: 18 },
 });
 
 // ==========================================

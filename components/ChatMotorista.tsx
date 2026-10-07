@@ -1,20 +1,19 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as signalR from '@microsoft/signalr';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useGlobalSearchParams, usePathname, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppOverlay from '../native/AppOverlay';
+import { emitirAvisoRecebido } from '../services/avisos';
+import { juntarMensagens as juntar, lerHistoricoLocal, salvarHistoricoLocal, type MensagemChat as Mensagem } from '../services/chatLocal';
 import { API_BASE, motoristaFetch, obterTokenMotorista, observarSessaoEncerrada } from '../services/motoristaApi';
 
-type Mensagem = { id: number; motoristaId: number; remetente: string; texto: string; criadoEm: string; lidaEm?: string; clienteId: string };
 const hora = (data: string) => new Date(/Z|[+-]\d\d:\d\d$/.test(data) ? data : `${data}Z`).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const clienteId = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
   const n = Math.floor(Math.random() * 16); return (c === 'x' ? n : (n & 3) | 8).toString(16);
 });
-function juntar(lista: Mensagem[], novas: Mensagem[]) {
-  return [...new Map([...lista, ...novas].map(m => [m.id, m])).values()].sort((a, b) => a.id - b.id);
-}
 
 export default function ChatMotorista() {
   const pathname = usePathname();
@@ -30,6 +29,7 @@ export default function ChatMotorista() {
   const [carregando, setCarregando] = useState(false);
   const [anteriores, setAnteriores] = useState(false);
   const [conectado, setConectado] = useState(false);
+  const [nomeAgencia, setNomeAgencia] = useState('');
   const abertoRef = useRef(false);
   const conhecidoRef = useRef(0);
   const inicializadoRef = useRef(false);
@@ -39,7 +39,12 @@ export default function ChatMotorista() {
   const scrollRef = useRef<ScrollView>(null);
   const acompanharRef = useRef(true);
   const cicloRef = useRef(0);
+  const motoristaIdRef = useRef<string | null>(null);
+  const historicoProntoRef = useRef(false);
+  const sincronizadoRef = useRef(0);
+  const nomeAgenciaRef = useRef('');
   const ativo = pathname.startsWith('/radar');
+  const tituloNotificacao = () => `Mensagem - ${nomeAgenciaRef.current || 'Agência'}`;
 
   const ler = useCallback(async (ateId: number) => {
     if (!ateId || AppState.currentState !== 'active') return;
@@ -48,25 +53,37 @@ export default function ChatMotorista() {
   }, []);
 
   const carregar = useCallback(async () => {
-    if (consultaRef.current) return;
+    if (consultaRef.current || !historicoProntoRef.current) return;
     consultaRef.current = true;
     const ciclo = cicloRef.current;
     try {
       const resposta = await motoristaFetch('/api/Chat/mensagens');
       if (!resposta.ok) throw new Error('Não foi possível carregar a conversa.');
       const dados = await resposta.json();
+      let lista: Mensagem[] = dados.mensagens;
+      // Busca no servidor o que chegou entre a última mensagem guardada no aparelho e as 60 mais recentes.
+      const sincronizado = sincronizadoRef.current;
+      let temMais = dados.temAnteriores;
+      for (let paginas = 0; sincronizado > 0 && temMais && lista.length && lista[0].id > sincronizado && paginas < 10; paginas++) {
+        const pagina = await motoristaFetch(`/api/Chat/mensagens?antesId=${lista[0].id}`);
+        if (!pagina.ok) break;
+        const anterioresServidor = await pagina.json();
+        lista = [...anterioresServidor.mensagens, ...lista];
+        temMais = anterioresServidor.temAnteriores;
+      }
       if (ciclo !== cicloRef.current) return;
-      const lista: Mensagem[] = dados.mensagens;
+      if (dados.nomeAgencia) { nomeAgenciaRef.current = dados.nomeAgencia; setNomeAgencia(dados.nomeAgencia); }
       setMensagens(atual => juntar(atual, lista));
-      if (!inicializadoRef.current) setAnteriores(dados.temAnteriores);
+      if (!inicializadoRef.current) setAnteriores(dados.temAnteriores && sincronizado === 0);
       setNaoLidas(dados.naoLidas);
       const ultima = lista.at(-1)?.id || 0;
       const novas = lista.filter(m => m.remetente === 'Agencia' && !m.lidaEm && m.id > conhecidoRef.current);
       if (!abertoRef.current && novas.length) {
         const m = novas.at(-1)!;
-        AppOverlay.notifyMessage(String(m.id), 'Mensagem da agência', m.texto).catch(() => {});
+        AppOverlay.notifyMessage(String(m.id), tituloNotificacao(), m.texto).catch(() => {});
       }
       conhecidoRef.current = Math.max(conhecidoRef.current, ultima);
+      sincronizadoRef.current = Math.max(sincronizado, ultima);
       inicializadoRef.current = true;
       if (abertoRef.current && dados.naoLidas) await ler(ultima);
       setErro('');
@@ -78,6 +95,11 @@ export default function ChatMotorista() {
     AppOverlay.stopRideMonitor().catch(() => {});
     setAberto(false); router.replace('/');
   }), [router]);
+
+  // Guarda no aparelho o histórico da conversa.
+  useEffect(() => {
+    if (historicoProntoRef.current && motoristaIdRef.current && mensagens.length) salvarHistoricoLocal(motoristaIdRef.current, mensagens);
+  }, [mensagens]);
 
   useEffect(() => {
     if (!ativo) return;
@@ -92,7 +114,7 @@ export default function ChatMotorista() {
       if (m.remetente === 'Agencia' && m.id > conhecidoRef.current) {
         if (!abertoRef.current || AppState.currentState !== 'active') {
           setNaoLidas(n => n + 1);
-          AppOverlay.notifyMessage(String(m.id), 'Mensagem da agência', m.texto).catch(() => {});
+          AppOverlay.notifyMessage(String(m.id), tituloNotificacao(), m.texto).catch(() => {});
         } else ler(m.id).catch(() => {});
       }
       conhecidoRef.current = Math.max(conhecidoRef.current, m.id);
@@ -101,6 +123,7 @@ export default function ChatMotorista() {
       if (dados.lidaPor === 'Agencia') setMensagens(lista => lista.map(m => m.id <= dados.ateId && m.remetente === 'Motorista' ? { ...m, lidaEm: dados.lidaEm } : m));
       else carregar();
     });
+    conexao.on('AvisoMotorista', emitirAvisoRecebido);
     conexao.onreconnecting(() => setConectado(false));
     conexao.onreconnected(() => { setConectado(true); carregar(); });
     const iniciar = async () => {
@@ -108,7 +131,22 @@ export default function ChatMotorista() {
       catch { if (!encerrado) tentativa = setTimeout(iniciar, 5000); }
     };
     conexao.onclose(() => { setConectado(false); if (!encerrado) tentativa = setTimeout(iniciar, 5000); });
-    carregar(); iniciar();
+    (async () => {
+      const [id, nome] = await Promise.all([AsyncStorage.getItem('idMotorista'), AsyncStorage.getItem('nomeAgencia')]);
+      const locais = id ? await lerHistoricoLocal(id) : [];
+      if (ciclo !== cicloRef.current) return;
+      motoristaIdRef.current = id;
+      if (nome && !nomeAgenciaRef.current) { nomeAgenciaRef.current = nome; setNomeAgencia(nome); }
+      if (locais.length) {
+        const maior = locais[locais.length - 1].id;
+        setMensagens(atual => juntar(locais, atual));
+        conhecidoRef.current = Math.max(conhecidoRef.current, maior);
+        sincronizadoRef.current = maior;
+      }
+      historicoProntoRef.current = true;
+      carregar();
+    })();
+    iniciar();
     const intervalo = setInterval(() => { if (AppState.currentState === 'active') carregar(); }, 15000);
     const estado = AppState.addEventListener('change', s => { if (s === 'active') carregar(); });
     return () => { encerrado = true; cicloRef.current = ciclo + 1; clearInterval(intervalo); clearTimeout(tentativa); estado.remove(); conexao.stop(); setConectado(false); };
@@ -116,7 +154,10 @@ export default function ChatMotorista() {
 
   useEffect(() => {
     if (pathname === '/radar/suporte' || (ativo && chat === '1')) { setAberto(true); abertoRef.current = true; acompanharRef.current = true; carregar(); }
-    if (!ativo) { setAberto(false); abertoRef.current = false; setMensagens([]); setTexto(''); setNaoLidas(0); pendenteRef.current = null; inicializadoRef.current = false; conhecidoRef.current = 0; }
+    if (!ativo) {
+      setAberto(false); abertoRef.current = false; setMensagens([]); setTexto(''); setNaoLidas(0); pendenteRef.current = null; inicializadoRef.current = false; conhecidoRef.current = 0;
+      historicoProntoRef.current = false; sincronizadoRef.current = 0; motoristaIdRef.current = null; nomeAgenciaRef.current = ''; setNomeAgencia('');
+    }
   }, [pathname, ativo, chat, carregar]);
 
   async function enviar() {
@@ -156,18 +197,20 @@ export default function ChatMotorista() {
       <Ionicons name="chatbubbles-outline" size={26} color="#fff" />
       {naoLidas > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{naoLidas > 99 ? '99+' : naoLidas}</Text></View>}
     </Pressable>
-    <Modal visible={aberto} transparent animationType="slide" onRequestClose={() => { abertoRef.current = false; setAberto(false); }}>
-      <KeyboardAvoidingView style={styles.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <Modal visible={aberto} transparent animationType="slide" statusBarTranslucent navigationBarTranslucent onRequestClose={() => { abertoRef.current = false; setAberto(false); }}>
+      {/* O teclado empurra a conversa para cima (Android e iPhone), mantendo o campo de digitação visível. */}
+      <KeyboardAvoidingView style={styles.overlay} behavior={Platform.OS === 'web' ? undefined : 'padding'}>
         <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Fechar conversa" onPress={() => { abertoRef.current = false; setAberto(false); }} />
         <View style={[styles.panel, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           <View style={styles.header}>
             <View style={styles.avatar}><Ionicons name="headset-outline" size={24} color="#047857" /></View>
-            <View style={{ flex: 1 }}><Text style={styles.title}>Sua agência</Text><Text style={styles.subtitle}>{conectado ? 'Conversa em tempo real' : 'Reconectando conversa…'}</Text></View>
+            <View style={{ flex: 1 }}><Text style={styles.title} numberOfLines={1}>{nomeAgencia || 'Sua agência'}</Text><Text style={styles.subtitle}>{conectado ? 'Conversa em tempo real' : 'Reconectando conversa…'}</Text></View>
             <Pressable accessibilityLabel="Fechar conversa" onPress={() => { abertoRef.current = false; setAberto(false); }} style={styles.close}><Ionicons name="close" size={25} color="#475569" /></Pressable>
           </View>
           <ScrollView ref={scrollRef} style={styles.history} contentContainerStyle={styles.messages} keyboardShouldPersistTaps="handled"
             scrollEventThrottle={100} onScroll={({ nativeEvent: e }) => { acompanharRef.current = e.contentSize.height - e.layoutMeasurement.height - e.contentOffset.y < 100; }}
-            onContentSizeChange={() => { if (acompanharRef.current) scrollRef.current?.scrollToEnd({ animated: false }); }}>
+            onContentSizeChange={() => { if (acompanharRef.current) scrollRef.current?.scrollToEnd({ animated: false }); }}
+            onLayout={() => { if (acompanharRef.current) scrollRef.current?.scrollToEnd({ animated: false }); }}>
             {anteriores && <Pressable onPress={carregarAnteriores}><Text style={styles.older}>{carregando ? 'Carregando…' : 'Carregar mensagens anteriores'}</Text></Pressable>}
             {!mensagens.length && <View style={styles.empty}><Ionicons name="chatbubble-ellipses-outline" size={40} color="#94a3b8" /><Text style={styles.emptyText}>Precisa de ajuda? Envie uma mensagem para sua agência.</Text></View>}
             {mensagens.map(m => <View key={m.id} style={[styles.bubble, m.remetente === 'Motorista' ? styles.sent : styles.received]}>
@@ -177,7 +220,8 @@ export default function ChatMotorista() {
           </ScrollView>
           {!!erro && <Pressable onPress={carregar}><Text accessibilityRole="alert" style={styles.error}>{erro}</Text></Pressable>}
           <View style={styles.composer}>
-            <TextInput accessibilityLabel="Mensagem para a agência" style={styles.input} placeholder="Escreva sua mensagem…" placeholderTextColor="#64748b" value={texto} onChangeText={setTexto} maxLength={2000} multiline editable={!enviando} />
+            <TextInput accessibilityLabel="Mensagem para a agência" style={styles.input} placeholder="Escreva sua mensagem…" placeholderTextColor="#64748b" value={texto} onChangeText={setTexto} maxLength={2000} multiline
+              onFocus={() => { acompanharRef.current = true; setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 250); }} />
             <Pressable accessibilityLabel="Enviar mensagem" disabled={enviando || !texto.trim()} onPress={enviar} style={[styles.send, (!texto.trim() || enviando) && { opacity: 0.5 }]}>{enviando ? <ActivityIndicator color="#fff" /> : <Ionicons name="arrow-up" size={24} color="#fff" />}</Pressable>
           </View>
         </View>

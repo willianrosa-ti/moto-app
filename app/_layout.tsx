@@ -2,6 +2,7 @@ import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import NativeAppSetup from '../components/NativeAppSetup';
 import ChatMotorista from '../components/ChatMotorista';
+import AvisoFlutuante from '../components/AvisoFlutuante';
 
 export default function Layout() {
   return (
@@ -13,6 +14,7 @@ export default function Layout() {
         }}
       />
       <ChatMotorista />
+      <AvisoFlutuante />
     </SafeAreaProvider>
   );
 }

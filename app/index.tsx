@@ -1,5 +1,5 @@
 import { salvarSessao, obterTokenMotorista } from '../services/motoristaApi';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -11,6 +11,7 @@ import {
   StatusBar,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
@@ -50,6 +51,8 @@ export default function LoginMotorista() {
   const [manterConectado, setManterConectado] = useState(false);
   const [carregando, setCarregando] = useState(false);
   const [processandoAcesso, setProcessandoAcesso] = useState(false);
+  const placaRef = useRef<TextInput>(null);
+  const senhaRef = useRef<TextInput>(null);
 
   useEffect(() => {
     const verificarLoginSalvo = async () => {
@@ -185,12 +188,14 @@ export default function LoginMotorista() {
   // ==========================================
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
+      {/* O teclado empurra o formulário para cima; a rolagem mantém o campo em uso visível em telas pequenas. */}
       <KeyboardAvoidingView
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'web' ? undefined : 'padding'}
       >
       <StatusBar backgroundColor="#1f2937" barStyle="light-content" />
 
+      <ScrollView contentContainerStyle={styles.rolagem} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
       <View style={styles.card}>
         <View style={styles.header}>
           <Text style={styles.milLinName}>M I L - L I N</Text>
@@ -212,6 +217,8 @@ export default function LoginMotorista() {
               onChangeText={setTelefone}
               keyboardType="phone-pad"
               autoCapitalize="none"
+              returnKeyType="next"
+              onSubmitEditing={() => placaRef.current?.focus()}
             />
           </View>
 
@@ -222,8 +229,11 @@ export default function LoginMotorista() {
               placeholder="ABC-1234"
               placeholderTextColor="#9ca3af"
               value={placa}
+              ref={placaRef}
               onChangeText={(texto) => setPlaca(texto.toUpperCase())}
               autoCapitalize="characters"
+              returnKeyType="next"
+              onSubmitEditing={() => senhaRef.current?.focus()}
             />
           </View>
 
@@ -234,8 +244,11 @@ export default function LoginMotorista() {
               placeholder="Digite sua senha"
               placeholderTextColor="#9ca3af"
               value={senha}
+              ref={senhaRef}
               onChangeText={setSenha}
               secureTextEntry
+              returnKeyType="go"
+              onSubmitEditing={handleLogin}
             />
           </View>
 
@@ -267,6 +280,7 @@ export default function LoginMotorista() {
 
         <Text style={styles.rodape}>Sistema conectado à sua agência</Text>
       </View>
+      </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -284,6 +298,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#1f2937',
+  },
+
+  rolagem: {
+    flexGrow: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,

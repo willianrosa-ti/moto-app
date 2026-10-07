@@ -30,7 +30,7 @@ public final class DriverNotifications {
             channel.enableVibration(true);
             manager.createNotificationChannel(channel);
         }
-        String route = id.startsWith("suporte-") ? "radar/notificacoes" : id.startsWith("jornada-") ? "radar" : "radar/suporte";
+        String route = id.startsWith("suporte-") ? "radar/notificacoes" : id.startsWith("jornada-") || id.startsWith("aviso-") ? "radar" : "radar/suporte";
         Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("appmotorista://" + route));
         intent.setPackage(context.getPackageName());
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);

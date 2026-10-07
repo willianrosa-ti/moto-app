@@ -784,13 +784,26 @@ public class RideMonitorService extends Service {
         if (appEmPrimeiroPlano) return;
         String json = consultarJson("/api/Chat/mensagens");
         if (json == null) return;
-        JSONArray mensagens = new JSONObject(json).optJSONArray("mensagens");
-        if (mensagens == null) return;
-        for (int i = mensagens.length() - 1; i >= 0; i--) {
-            JSONObject m = mensagens.getJSONObject(i);
-            if ("Agencia".equals(m.optString("remetente")) && m.isNull("lidaEm")) {
-                DriverNotifications.show(this, m.optString("id"), "Mensagem da agência", m.optString("texto"));
-                break;
+        JSONObject chat = new JSONObject(json);
+        String tituloMensagem = "Mensagem - " + nomeAgencia(chat);
+        JSONArray mensagens = chat.optJSONArray("mensagens");
+        if (mensagens != null) {
+            for (int i = mensagens.length() - 1; i >= 0; i--) {
+                JSONObject m = mensagens.getJSONObject(i);
+                if ("Agencia".equals(m.optString("remetente")) && m.isNull("lidaEm")) {
+                    DriverNotifications.show(this, m.optString("id"), tituloMensagem, m.optString("texto"));
+                    break;
+                }
+            }
+        }
+        String avisosJson = consultarJson("/api/Avisos/meus");
+        if (avisosJson != null) {
+            JSONObject resposta = new JSONObject(avisosJson);
+            JSONArray avisos = resposta.optJSONArray("avisos");
+            String tituloAviso = "Aviso - " + nomeAgencia(resposta);
+            for (int i = 0; avisos != null && i < avisos.length(); i++) {
+                JSONObject aviso = avisos.getJSONObject(i);
+                if (aviso.isNull("vistoEm")) DriverNotifications.show(this, "aviso-" + aviso.optString("id"), tituloAviso, aviso.optString("texto"));
             }
         }
         String suporteJson = consultarJson("/api/Suporte/minhas-respostas");
@@ -803,6 +816,11 @@ public class RideMonitorService extends Service {
                 }
             }
         }
+    }
+
+    private static String nomeAgencia(JSONObject dados) {
+        String nome = dados.isNull("nomeAgencia") ? "" : dados.optString("nomeAgencia", "").trim();
+        return nome.isEmpty() ? "Agência" : nome;
     }
 
     private void consultarFila() throws Exception {
