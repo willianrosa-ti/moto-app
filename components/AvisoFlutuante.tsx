@@ -8,12 +8,11 @@ const dataHora = (valor: string) => new Date(/Z|[+-]\d\d:\d\d$/.test(valor) ? va
   .toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
 // Avisos da agência aparecem no meio da tela, por cima de qualquer página (radar, financeiro, notificações, corrida...).
-// Só o X vermelho fecha o aviso; depois ele continua disponível em Notificações.
+// Mostra só o ícone e a mensagem, em negrito. Só o X vermelho fecha o aviso; depois ele continua em Notificações.
 export default function AvisoFlutuante() {
   const pathname = usePathname();
   const ativo = pathname.startsWith('/radar');
   const [fila, setFila] = useState<AvisoMotorista[]>([]);
-  const [nomeAgencia, setNomeAgencia] = useState('');
   const fechadosRef = useRef(new Set<number>());
   const pendentesRef = useRef(new Set<number>());
   const consultandoRef = useRef(false);
@@ -37,7 +36,6 @@ export default function AvisoFlutuante() {
     pendentesRef.current.forEach(confirmarLeitura);
     try {
       const dados = await buscarAvisos();
-      setNomeAgencia(dados.nomeAgencia);
       adicionar(dados.avisos);
     } catch { /* Sem conexão: tenta de novo no próximo ciclo. */ }
     finally { consultandoRef.current = false; }
@@ -47,7 +45,6 @@ export default function AvisoFlutuante() {
     if (!ativo) { setFila([]); return; }
     sincronizar();
     const parar = observarAvisos(aviso => {
-      if (aviso.nomeAgencia) setNomeAgencia(aviso.nomeAgencia);
       adicionar([aviso]);
       Vibration.vibrate(400);
     });
@@ -68,12 +65,11 @@ export default function AvisoFlutuante() {
   return (
     <Modal visible transparent animationType="fade" statusBarTranslucent navigationBarTranslucent onRequestClose={() => {}}>
       <View style={styles.fundo}>
-        <View style={styles.cartao} accessibilityRole="alert">
+        <View style={styles.cartao} accessibilityRole="alert" accessibilityLabel="Aviso da agência">
           <Pressable onPress={fechar} style={styles.fechar} accessibilityRole="button" accessibilityLabel="Fechar aviso" hitSlop={14}>
             <Ionicons name="close" size={32} color="#fff" />
           </Pressable>
           <View style={styles.icone}><Ionicons name="megaphone" size={30} color="#b45309" /></View>
-          <Text style={styles.titulo}>Aviso - {nomeAgencia || 'Agência'}</Text>
           <ScrollView style={styles.rolagem} contentContainerStyle={styles.rolagemConteudo}>
             <Text style={styles.texto} selectable>{atual.texto}</Text>
           </ScrollView>
@@ -89,9 +85,8 @@ const styles = StyleSheet.create({
   cartao: { width: '100%', maxWidth: 420, backgroundColor: '#fff', borderRadius: 24, paddingHorizontal: 22, paddingTop: 28, paddingBottom: 20, alignItems: 'center', gap: 12, elevation: 14, shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 20, shadowOffset: { width: 0, height: 8 } },
   fechar: { position: 'absolute', top: 12, right: 12, width: 50, height: 50, borderRadius: 25, backgroundColor: '#dc2626', borderWidth: 3, borderColor: '#fecaca', alignItems: 'center', justifyContent: 'center', elevation: 8, zIndex: 2 },
   icone: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#fef3c7', alignItems: 'center', justifyContent: 'center' },
-  titulo: { fontSize: 18, fontWeight: '800', color: '#0f172a', textAlign: 'center', marginHorizontal: 48 },
   rolagem: { maxHeight: 340, alignSelf: 'stretch' },
   rolagemConteudo: { paddingVertical: 4 },
-  texto: { fontSize: 17, lineHeight: 25, color: '#1e293b', textAlign: 'center' },
+  texto: { fontSize: 18, lineHeight: 26, fontWeight: '800', color: '#0f172a', textAlign: 'center' },
   data: { fontSize: 12, color: '#64748b' },
 });
