@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export type MensagemChat = { id: number; motoristaId: number; remetente: string; texto: string; criadoEm: string; lidaEm?: string | null; clienteId: string };
+export type MensagemChat = { id: number; motoristaId: number; remetente: string; texto: string; criadoEm: string; lidaEm?: string | null; clienteId: string; audioId?: string | null; duracaoAudioMs?: number | null };
 
 // O histórico do chat fica no aparelho. O servidor guarda cada mensagem só até a entrega e a leitura.
 export const LIMITE_MENSAGENS_LOCAIS = 500;

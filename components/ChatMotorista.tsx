@@ -7,6 +7,8 @@ import { ActivityIndicator, AppState, KeyboardAvoidingView, Modal, Platform, Pre
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppOverlay from '../native/AppOverlay';
 import { emitirAvisoRecebido } from '../services/avisos';
+import { DURACAO_MAXIMA_MS, enviarGravacao, formatarDuracao, iniciarGravacao, obterUriAudio, type Gravacao, type GravacaoAtiva } from '../services/audioMotorista';
+import PlayerAudio from './PlayerAudio';
 import { juntarMensagens as juntar, lerHistoricoLocal, salvarHistoricoLocal, type MensagemChat as Mensagem } from '../services/chatLocal';
 import { API_BASE, motoristaFetch, obterTokenMotorista, observarSessaoEncerrada } from '../services/motoristaApi';
 
@@ -14,6 +16,7 @@ const hora = (data: string) => new Date(/Z|[+-]\d\d:\d\d$/.test(data) ? data : `
 const clienteId = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
   const n = Math.floor(Math.random() * 16); return (c === 'x' ? n : (n & 3) | 8).toString(16);
 });
+type AudioPendente = Gravacao & { clienteId: string; audioId?: string };
 
 export default function ChatMotorista() {
   const pathname = usePathname();
@@ -30,6 +33,10 @@ export default function ChatMotorista() {
   const [anteriores, setAnteriores] = useState(false);
   const [conectado, setConectado] = useState(false);
   const [nomeAgencia, setNomeAgencia] = useState('');
+  const [gravando, setGravando] = useState(false);
+  const [tempoGravacao, setTempoGravacao] = useState(0);
+  const [audioPendente, setAudioPendente] = useState<AudioPendente | null>(null);
+  const gravadorRef = useRef<GravacaoAtiva | null>(null);
   const abertoRef = useRef(false);
   const conhecidoRef = useRef(0);
   const inicializadoRef = useRef(false);
@@ -96,6 +103,21 @@ export default function ChatMotorista() {
     setAberto(false); router.replace('/');
   }), [router]);
 
+  // Áudios recebidos ficam guardados no celular assim que chegam, mesmo antes de serem ouvidos.
+  useEffect(() => {
+    mensagens.forEach(m => { if (m.audioId) obterUriAudio(m.audioId).catch(() => {}); });
+  }, [mensagens]);
+
+  useEffect(() => {
+    if (!gravando) return;
+    const intervalo = setInterval(() => {
+      const ms = Date.now() - (gravadorRef.current?.inicio ?? Date.now());
+      setTempoGravacao(ms);
+      if (ms >= DURACAO_MAXIMA_MS) pararGravacao();
+    }, 250);
+    return () => clearInterval(intervalo);
+  }, [gravando]);
+
   // Guarda no aparelho o histórico da conversa.
   useEffect(() => {
     if (historicoProntoRef.current && motoristaIdRef.current && mensagens.length) salvarHistoricoLocal(motoristaIdRef.current, mensagens);
@@ -157,6 +179,7 @@ export default function ChatMotorista() {
     if (!ativo) {
       setAberto(false); abertoRef.current = false; setMensagens([]); setTexto(''); setNaoLidas(0); pendenteRef.current = null; inicializadoRef.current = false; conhecidoRef.current = 0;
       historicoProntoRef.current = false; sincronizadoRef.current = 0; motoristaIdRef.current = null; nomeAgenciaRef.current = ''; setNomeAgencia('');
+      gravadorRef.current?.cancelar().catch(() => {}); gravadorRef.current = null; setGravando(false); setAudioPendente(null);
     }
   }, [pathname, ativo, chat, carregar]);
 
@@ -175,6 +198,52 @@ export default function ChatMotorista() {
       setMensagens(lista => juntar(lista, [mensagem])); setTexto(''); pendenteRef.current = null;
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
     } catch (e) { setErro(e instanceof Error ? e.message : 'Sem conexão. Tente novamente.'); }
+    finally { enviandoRef.current = false; setEnviando(false); }
+  }
+
+  function fechar() {
+    abertoRef.current = false; setAberto(false);
+    if (gravadorRef.current) descartarAudio();
+  }
+
+  async function gravarAudio() {
+    setErro('');
+    try { gravadorRef.current = await iniciarGravacao(); setTempoGravacao(0); setGravando(true); }
+    catch (e) { setErro(e instanceof Error ? e.message : 'Não foi possível gravar o áudio.'); }
+  }
+
+  async function pararGravacao(): Promise<AudioPendente | null> {
+    const gravador = gravadorRef.current;
+    if (!gravador) return null;
+    gravadorRef.current = null; setGravando(false);
+    try {
+      const pendente = { ...(await gravador.parar()), clienteId: clienteId() };
+      setAudioPendente(pendente);
+      return pendente;
+    } catch (e) { setErro(e instanceof Error ? e.message : 'A gravação falhou. Tente de novo.'); return null; }
+  }
+
+  function descartarAudio() {
+    gravadorRef.current?.cancelar().catch(() => {}); gravadorRef.current = null;
+    setGravando(false); setAudioPendente(null);
+  }
+
+  async function enviarAudio() {
+    if (enviandoRef.current) return;
+    let pendente = gravadorRef.current ? await pararGravacao() : audioPendente;
+    if (!pendente) return;
+    enviandoRef.current = true; setEnviando(true); setErro('');
+    try {
+      if (!pendente.audioId) { pendente = { ...pendente, audioId: await enviarGravacao(pendente) }; setAudioPendente(pendente); }
+      const resposta = await motoristaFetch('/api/Chat/mensagens', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audioId: pendente.audioId, clienteId: pendente.clienteId }),
+      });
+      if (!resposta.ok) throw new Error('Não foi possível enviar o áudio.');
+      const mensagem = await resposta.json();
+      setMensagens(lista => juntar(lista, [mensagem])); setAudioPendente(null);
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
+    } catch (e) { setErro(`${e instanceof Error ? e.message : 'Sem conexão.'} O áudio foi preservado; tente novamente.`); }
     finally { enviandoRef.current = false; setEnviando(false); }
   }
 
@@ -197,15 +266,15 @@ export default function ChatMotorista() {
       <Ionicons name="chatbubbles-outline" size={26} color="#fff" />
       {naoLidas > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{naoLidas > 99 ? '99+' : naoLidas}</Text></View>}
     </Pressable>
-    <Modal visible={aberto} transparent animationType="slide" statusBarTranslucent navigationBarTranslucent onRequestClose={() => { abertoRef.current = false; setAberto(false); }}>
+    <Modal visible={aberto} transparent animationType="slide" statusBarTranslucent navigationBarTranslucent onRequestClose={fechar}>
       {/* O teclado empurra a conversa para cima (Android e iPhone), mantendo o campo de digitação visível. */}
       <KeyboardAvoidingView style={styles.overlay} behavior={Platform.OS === 'web' ? undefined : 'padding'}>
-        <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Fechar conversa" onPress={() => { abertoRef.current = false; setAberto(false); }} />
+        <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Fechar conversa" onPress={fechar} />
         <View style={[styles.panel, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           <View style={styles.header}>
             <View style={styles.avatar}><Ionicons name="headset-outline" size={24} color="#047857" /></View>
             <View style={{ flex: 1 }}><Text style={styles.title} numberOfLines={1}>{nomeAgencia || 'Sua agência'}</Text><Text style={styles.subtitle}>{conectado ? 'Conversa em tempo real' : 'Reconectando conversa…'}</Text></View>
-            <Pressable accessibilityLabel="Fechar conversa" onPress={() => { abertoRef.current = false; setAberto(false); }} style={styles.close}><Ionicons name="close" size={25} color="#475569" /></Pressable>
+            <Pressable accessibilityLabel="Fechar conversa" onPress={fechar} style={styles.close}><Ionicons name="close" size={25} color="#475569" /></Pressable>
           </View>
           <ScrollView ref={scrollRef} style={styles.history} contentContainerStyle={styles.messages} keyboardShouldPersistTaps="handled"
             scrollEventThrottle={100} onScroll={({ nativeEvent: e }) => { acompanharRef.current = e.contentSize.height - e.layoutMeasurement.height - e.contentOffset.y < 100; }}
@@ -214,15 +283,28 @@ export default function ChatMotorista() {
             {anteriores && <Pressable onPress={carregarAnteriores}><Text style={styles.older}>{carregando ? 'Carregando…' : 'Carregar mensagens anteriores'}</Text></Pressable>}
             {!mensagens.length && <View style={styles.empty}><Ionicons name="chatbubble-ellipses-outline" size={40} color="#94a3b8" /><Text style={styles.emptyText}>Precisa de ajuda? Envie uma mensagem para sua agência.</Text></View>}
             {mensagens.map(m => <View key={m.id} style={[styles.bubble, m.remetente === 'Motorista' ? styles.sent : styles.received]}>
-              <Text style={styles.messageText} selectable>{m.texto}</Text>
+              {m.audioId ? <PlayerAudio audioId={m.audioId} duracaoMs={m.duracaoAudioMs} /> : <Text style={styles.messageText} selectable>{m.texto}</Text>}
               <Text style={styles.time}>{hora(m.criadoEm)}{m.remetente === 'Motorista' ? m.lidaEm ? ' · Lida' : ' · Enviada' : ''}</Text>
             </View>)}
           </ScrollView>
           {!!erro && <Pressable onPress={carregar}><Text accessibilityRole="alert" style={styles.error}>{erro}</Text></Pressable>}
           <View style={styles.composer}>
-            <TextInput accessibilityLabel="Mensagem para a agência" style={styles.input} placeholder="Escreva sua mensagem…" placeholderTextColor="#64748b" value={texto} onChangeText={setTexto} maxLength={2000} multiline
-              onFocus={() => { acompanharRef.current = true; setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 250); }} />
-            <Pressable accessibilityLabel="Enviar mensagem" disabled={enviando || !texto.trim()} onPress={enviar} style={[styles.send, (!texto.trim() || enviando) && { opacity: 0.5 }]}>{enviando ? <ActivityIndicator color="#fff" /> : <Ionicons name="arrow-up" size={24} color="#fff" />}</Pressable>
+            {gravando ? (
+              <View style={styles.gravacao} accessibilityLiveRegion="polite"><View style={styles.pontoGravando} /><Text style={styles.textoGravando}>Gravando {formatarDuracao(tempoGravacao)}</Text></View>
+            ) : audioPendente ? (
+              <View style={styles.gravacao}><Ionicons name="mic" size={18} color="#047857" /><Text style={styles.textoPendente}>Áudio de {formatarDuracao(audioPendente.duracaoMs)} pronto para enviar</Text></View>
+            ) : (
+              <TextInput accessibilityLabel="Mensagem para a agência" style={styles.input} placeholder="Escreva sua mensagem…" placeholderTextColor="#64748b" value={texto} onChangeText={setTexto} maxLength={2000} multiline
+                onFocus={() => { acompanharRef.current = true; setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 250); }} />
+            )}
+            {gravando || audioPendente ? <>
+              <Pressable accessibilityLabel="Descartar áudio" disabled={enviando} onPress={descartarAudio} style={[styles.send, styles.descartar]}><Ionicons name="trash-outline" size={22} color="#b91c1c" /></Pressable>
+              <Pressable accessibilityLabel="Enviar áudio" disabled={enviando} onPress={enviarAudio} style={[styles.send, enviando && { opacity: 0.5 }]}>{enviando ? <ActivityIndicator color="#fff" /> : <Ionicons name="arrow-up" size={24} color="#fff" />}</Pressable>
+            </> : texto.trim() ? (
+              <Pressable accessibilityLabel="Enviar mensagem" disabled={enviando} onPress={enviar} style={[styles.send, enviando && { opacity: 0.5 }]}>{enviando ? <ActivityIndicator color="#fff" /> : <Ionicons name="arrow-up" size={24} color="#fff" />}</Pressable>
+            ) : (
+              <Pressable accessibilityLabel="Gravar áudio" onPress={gravarAudio} style={styles.send}><Ionicons name="mic" size={24} color="#fff" /></Pressable>
+            )}
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -238,4 +320,7 @@ const styles = StyleSheet.create({
   header: { backgroundColor: '#fff', flexDirection: 'row', alignItems: 'center', padding: 18, gap: 12, borderBottomWidth: 1, borderBottomColor: '#e2e8f0' }, avatar: { width: 44, height: 44, borderRadius: 16, backgroundColor: '#d1fae5', alignItems: 'center', justifyContent: 'center' }, title: { fontSize: 17, fontWeight: '700', color: '#0f172a' }, subtitle: { fontSize: 12, color: '#64748b', marginTop: 3 }, close: { padding: 8 },
   history: { flex: 1 }, messages: { padding: 18, gap: 10 }, bubble: { maxWidth: '86%', padding: 12, borderRadius: 18 }, sent: { alignSelf: 'flex-end', backgroundColor: '#d1fae5', borderBottomRightRadius: 5 }, received: { alignSelf: 'flex-start', backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', borderBottomLeftRadius: 5 }, messageText: { color: '#0f172a', fontSize: 15, lineHeight: 22 }, time: { fontSize: 10, color: '#64748b', textAlign: 'right', marginTop: 6 }, empty: { paddingVertical: 65, alignItems: 'center', gap: 14 }, emptyText: { color: '#64748b', textAlign: 'center', lineHeight: 22, maxWidth: 270 }, older: { color: '#047857', textAlign: 'center', padding: 10, fontSize: 13 },
   composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, padding: 12, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e2e8f0' }, input: { flex: 1, maxHeight: 120, minHeight: 46, backgroundColor: '#f1f5f9', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 12, color: '#0f172a', fontSize: 15 }, send: { width: 46, height: 46, backgroundColor: '#047857', borderRadius: 23, alignItems: 'center', justifyContent: 'center' }, error: { color: '#b91c1c', fontSize: 12, paddingHorizontal: 18, paddingVertical: 8 },
+  gravacao: { flex: 1, minHeight: 46, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, backgroundColor: '#f1f5f9', borderRadius: 20 },
+  pontoGravando: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#dc2626' }, textoGravando: { color: '#b91c1c', fontWeight: '700', fontSize: 14 },
+  textoPendente: { color: '#0f172a', fontSize: 13, flexShrink: 1 }, descartar: { backgroundColor: '#fee2e2' },
 });

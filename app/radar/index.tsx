@@ -1,5 +1,6 @@
 import { motoristaFetch, obterTokenMotorista, obterRefreshToken, encerrarSessao } from '../../services/motoristaApi';
 import WebPwaNotice from '../../components/WebPwaNotice';
+import PlayerAudio from '../../components/PlayerAudio';
 import AppOverlay from '../../native/AppOverlay';
 import { Ionicons } from '@expo/vector-icons';
 import * as signalR from '@microsoft/signalr';
@@ -1420,35 +1421,46 @@ export default function Radar() {
               <Text>Passageiro: <Text style={{ fontWeight: 'bold' }}>{corridaRecebida.passageiro}</Text></Text>
             </View>
 
-            <View style={styles.blocoEndereco}>
-              <Text style={styles.tituloBloco}>{corridaRecebida.etapa === 'Destino' ? '✓ BUSCA CONCLUÍDA' : '1 · BUSCAR EM:'}</Text>
-              <Text style={styles.enderecoTexto}>{corridaRecebida.busca}</Text>
-              <Text style={styles.distanciaTextoCompacta}>{formatarQuilometragem(corridaRecebida.distanciaBusca)}</Text>
-              <View style={styles.botoesGpsLinha}>
-                <TouchableOpacity style={[styles.btnGps, styles.waze]} onPress={() => abrirGPS('waze', corridaRecebida.busca)}>
-                  <Text style={styles.btnTextoBranco}>Waze</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.btnGps, styles.maps]} onPress={() => abrirGPS('maps', corridaRecebida.busca)}>
-                  <Text style={styles.btnTextoBranco}>Maps</Text>
-                </TouchableOpacity>
+            {/* Corrida por áudio: o endereço está na gravação da agência e pode ser ouvido quantas vezes precisar. */}
+            {corridaRecebida.audioId ? (
+              <View style={styles.blocoEndereco}>
+                <Text style={styles.tituloBloco}>{corridaRecebida.etapa === 'Destino' ? '✓ BUSCA CONCLUÍDA · ENDEREÇO NO ÁUDIO' : '🎤 ENDEREÇO NO ÁUDIO DA AGÊNCIA'}</Text>
+                <PlayerAudio audioId={corridaRecebida.audioId} duracaoMs={corridaRecebida.duracaoAudioMs} grande cor={temaAgencia.corPrimaria} reproduzirAoAbrir />
+                <Text style={styles.textoAudioCorrida}>Ouça quantas vezes precisar até finalizar a corrida.</Text>
               </View>
-            </View>
-
-            <View style={styles.divisor} />
-
-            <View style={styles.blocoEndereco}>
-              <Text style={styles.tituloBloco}>2 · LEVAR PARA:</Text>
-              <Text style={styles.enderecoTexto}>{corridaRecebida.destino}</Text>
-              <Text style={styles.distanciaTextoCompacta}>{formatarQuilometragem(corridaRecebida.distanciaDestino)}</Text>
-              <View style={styles.botoesGpsLinha}>
-                <TouchableOpacity style={[styles.btnGps, styles.waze]} onPress={() => abrirGPS('waze', corridaRecebida.destino)}>
-                  <Text style={styles.btnTextoBranco}>Waze</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.btnGps, styles.maps]} onPress={() => abrirGPS('maps', corridaRecebida.destino)}>
-                  <Text style={styles.btnTextoBranco}>Maps</Text>
-                </TouchableOpacity>
+            ) : (
+              <>
+              <View style={styles.blocoEndereco}>
+                <Text style={styles.tituloBloco}>{corridaRecebida.etapa === 'Destino' ? '✓ BUSCA CONCLUÍDA' : '1 · BUSCAR EM:'}</Text>
+                <Text style={styles.enderecoTexto}>{corridaRecebida.busca}</Text>
+                <Text style={styles.distanciaTextoCompacta}>{formatarQuilometragem(corridaRecebida.distanciaBusca)}</Text>
+                <View style={styles.botoesGpsLinha}>
+                  <TouchableOpacity style={[styles.btnGps, styles.waze]} onPress={() => abrirGPS('waze', corridaRecebida.busca)}>
+                    <Text style={styles.btnTextoBranco}>Waze</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.btnGps, styles.maps]} onPress={() => abrirGPS('maps', corridaRecebida.busca)}>
+                    <Text style={styles.btnTextoBranco}>Maps</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
+
+              <View style={styles.divisor} />
+
+              <View style={styles.blocoEndereco}>
+                <Text style={styles.tituloBloco}>2 · LEVAR PARA:</Text>
+                <Text style={styles.enderecoTexto}>{corridaRecebida.destino}</Text>
+                <Text style={styles.distanciaTextoCompacta}>{formatarQuilometragem(corridaRecebida.distanciaDestino)}</Text>
+                <View style={styles.botoesGpsLinha}>
+                  <TouchableOpacity style={[styles.btnGps, styles.waze]} onPress={() => abrirGPS('waze', corridaRecebida.destino)}>
+                    <Text style={styles.btnTextoBranco}>Waze</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.btnGps, styles.maps]} onPress={() => abrirGPS('maps', corridaRecebida.destino)}>
+                    <Text style={styles.btnTextoBranco}>Maps</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              </>
+            )}
 
             <TouchableOpacity style={[styles.btnFinalizarTotal, { backgroundColor: temaAgencia.corPrimaria }]} disabled={alterandoEtapa} onPress={pedirConfirmacaoFinalizacao}>
               <Text style={styles.btnTextoBranco}>{alterandoEtapa ? 'SALVANDO...' : corridaRecebida.etapa === 'Destino' ? 'FINALIZAR CORRIDA' : 'PASSAGEIRO EMBARCADO'}</Text>
@@ -1759,6 +1771,7 @@ const styles = StyleSheet.create({
   btnGps: { flex: 1, padding: 10, borderRadius: 6, alignItems: 'center' },
   waze: { backgroundColor: '#33ccff' },
   maps: { backgroundColor: '#4285f4' },
+  textoAudioCorrida: { fontSize: 12, color: '#6b7280', marginTop: 8, textAlign: 'center' },
   divisor: { borderTopWidth: 1, borderTopColor: '#ccc', borderStyle: 'dashed', marginVertical: 20 },
   btnFinalizarTotal: { backgroundColor: '#28a745', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 10 },
   caixaProximaCorrida: {
