@@ -24,6 +24,7 @@ type AppOverlayNativeModule = {
   startRideMonitor: (token: string, apiBase: string, refreshToken: string, radarAtivo: boolean) => Promise<void>;
   notifyMessage: (id: string, title: string, text: string) => Promise<void>;
   startRadioAudio: () => Promise<void>;
+  tocarBipeRadio: () => Promise<number>;
   stopRadioAudio: () => Promise<void>;
   stopRideMonitor: () => Promise<void>;
   setRideMonitorForeground: (appEmPrimeiroPlano: boolean) => Promise<void>;
@@ -33,6 +34,7 @@ const moduloNativo = NativeModules.AppOverlay as AppOverlayNativeModule | undefi
 const mensagensNotificadas = new Set<string>();
 
 const AppOverlay = {
+  async tocarBipeRadio() { return Platform.OS === 'android' && moduloNativo?.tocarBipeRadio ? moduloNativo.tocarBipeRadio() : 0; },
   async startRadioAudio() { if (Platform.OS === 'android' && moduloNativo?.startRadioAudio) await moduloNativo.startRadioAudio(); },
   async stopRadioAudio() { if (Platform.OS === 'android' && moduloNativo?.stopRadioAudio) await moduloNativo.stopRadioAudio(); },
   async isSupported() {

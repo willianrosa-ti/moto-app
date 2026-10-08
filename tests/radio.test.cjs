@@ -64,3 +64,48 @@ test('estados fora de ordem não reabrem vez encerrada', async () => {
   f.client.receive(chamada({ versao: 5 })); f.client.receive(chamada({ versao: 4, falante: a.chave, falaAte: new Date(Date.now() + 20000).toISOString() }));
   assert.equal(f.track.enabled, false); await f.client.dispose();
 });
+function convite(patch = {}) { return chamada({ origem: b, destino: a, origemAparelho: 'x', destinoAparelho: null, status: 'Tocando', ...patch }); }
+async function chamado({ aberto = { valor: true }, aceitar } = {}) {
+  const { RadioClient } = await modulo;
+  const log = [];
+  const track = { enabled: false, stop() {} }, stream = { getTracks: () => [track], getAudioTracks: () => [track] };
+  const hub = { connectionId: 'a', on() {}, onreconnecting() {}, onreconnected() {}, onclose() {}, stop: async () => {},
+    invoke: async (metodo, id, acao) => { log.push(acao || metodo); if (acao === 'Aceitar') return aceitar ? aceitar() : convite({ versao: 2, destinoAparelho: 'a' }); } };
+  const client = new RadioClient({ hub, update() {}, config: async () => ({ eu: a, voz: { habilitado: true, iceServers: [] } }),
+    media: { microphone: async () => stream, clear() {} }, autoAtender: () => aberto.valor });
+  client.state.eu = a; client.state.conectado = true;
+  return { client, log };
+}
+const espera = ms => new Promise(resolve => setTimeout(resolve, ms));
+test('rádio: quem é chamado conecta direto, sem aceitar, com o app aberto', async () => {
+  const f = await chamado();
+  f.client.receive(convite()); await espera(10);
+  assert.ok(f.log.includes('Aceitar')); assert.equal(f.client.state.erro, ''); await f.client.dispose();
+});
+test('rádio: chamado em segundo plano conecta ao voltar para o app', async () => {
+  const aberto = { valor: false }; const f = await chamado({ aberto });
+  f.client.receive(convite()); await espera(10); assert.ok(!f.log.includes('Aceitar'));
+  aberto.valor = true; f.client.atenderPendente(); await espera(10);
+  assert.ok(f.log.includes('Aceitar')); await f.client.dispose();
+});
+test('rádio: outro aparelho da mesma conta conectou primeiro, sem erro na tela', async () => {
+  const f = await chamado({ aceitar: async () => { throw new Error('HubException: Convite já atendido.'); } });
+  f.client.receive(convite()); await espera(10);
+  assert.equal(f.client.state.chamada, null); assert.equal(f.client.state.erro, ''); await f.client.dispose();
+});
+test('rádio: bipe ao apertar e microfone só abre depois dele', async () => {
+  const f = await fixture(); const bipes = [];
+  f.client.bipe = tipo => { bipes.push(tipo); return 40; };
+  f.invoke(async (metodo, id, acao) => chamada({ falante: acao === 'PedirFala' ? a.chave : null, falaAte: new Date(Date.now() + 20000).toISOString(), versao: acao === 'PedirFala' ? 2 : 3 }));
+  await f.client.press();
+  assert.deepEqual(bipes, ['falar']); assert.equal(f.track.enabled, false);
+  await espera(60); assert.equal(f.track.enabled, true);
+  await f.client.release(); assert.equal(f.track.enabled, false); await f.client.dispose();
+});
+test('rádio: bipe toca uma vez quando o outro começa a falar', async () => {
+  const f = await fixture(); const bipes = [];
+  f.client.bipe = tipo => { bipes.push(tipo); return 0; };
+  const fala = { falante: b.chave, falaAte: new Date(Date.now() + 20000).toISOString() };
+  f.client.receive(chamada({ versao: 2, ...fala })); f.client.receive(chamada({ versao: 3, ...fala }));
+  assert.deepEqual(bipes, ['ouvir']); await f.client.dispose();
+});

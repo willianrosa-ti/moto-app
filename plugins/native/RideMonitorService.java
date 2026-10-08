@@ -788,7 +788,7 @@ public class RideMonitorService extends Service {
             JSONObject chamada = radio.optJSONObject("chamada");
             if (chamada != null && radio.optBoolean("recebendo")) {
                 JSONObject origem = chamada.optJSONObject("origem");
-                DriverNotifications.show(this, "radio-" + chamada.optString("id"), "Rádio · " + (origem == null ? "Agência" : origem.optString("nome")), "Bipe! Abra o app para atender.");
+                DriverNotifications.show(this, "radio-" + chamada.optString("id"), "Rádio · " + (origem == null ? "Agência" : origem.optString("nome")), "Rádio chamando. Toque para abrir e conectar.");
             }
         }
         String diretasJson = consultarJson("/api/ChatDireto/novas");

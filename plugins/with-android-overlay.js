@@ -166,6 +166,14 @@ function copiarBuzina(projectRoot) {
   fs.copyFileSync(origem, destino);
 }
 
+function copiarBipeRadio(projectRoot) {
+  const origem = path.join(projectRoot, 'assets', 'sounds', 'pri-radio.mp3');
+  const destino = path.join(projectRoot, 'android', 'app', 'src', 'main', 'res', 'raw', 'pri_radio.mp3');
+  if (!fs.existsSync(origem)) return;
+  fs.mkdirSync(path.dirname(destino), { recursive: true });
+  fs.copyFileSync(origem, destino);
+}
+
 function copiarServicoMonitor(projectRoot) {
   const origem = path.join(__dirname, 'native', 'RideMonitorService.java');
   if (!fs.existsSync(origem)) return;
@@ -351,6 +359,35 @@ public class AppOverlayModule extends ReactContextBaseJavaModule {
                 promise.reject("E_OVERLAY_HIDE", "Nao foi possivel esconder a sobreposicao.", erro);
             }
         });
+    }
+
+    // Bipe do rádio (PRI RADIO) ao apertar para falar. Toca pela mesma saída da conversa (fone ou
+    // alto-falante) e não pede foco de áudio: pedir o foco interromperia o próprio rádio.
+    @ReactMethod
+    public void tocarBipeRadio(Promise promise) {
+        MediaPlayer mediaPlayer = new MediaPlayer();
+        AssetFileDescriptor arquivo = null;
+        try {
+            mediaPlayer.setAudioAttributes(new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build());
+            arquivo = reactContext.getResources().openRawResourceFd(R.raw.pri_radio);
+            if (arquivo == null) throw new IllegalStateException("Bipe do rádio não encontrado.");
+            mediaPlayer.setDataSource(arquivo.getFileDescriptor(), arquivo.getStartOffset(), arquivo.getLength());
+            mediaPlayer.setLooping(false);
+            buzinasAtivas.add(mediaPlayer);
+            mediaPlayer.setOnCompletionListener(AppOverlayModule::liberarBuzina);
+            mediaPlayer.setOnErrorListener((player, what, extra) -> { liberarBuzina(player); return true; });
+            mediaPlayer.prepare();
+            mediaPlayer.start();
+            promise.resolve(mediaPlayer.getDuration());
+        } catch (Exception erro) {
+            liberarBuzina(mediaPlayer);
+            promise.reject("E_RADIO_BIPE", "Nao foi possivel tocar o bipe do radio.", erro);
+        } finally {
+            if (arquivo != null) try { arquivo.close(); } catch (Exception ignorado) { }
+        }
     }
 
     @ReactMethod
@@ -655,6 +692,7 @@ module.exports = function withAndroidOverlay(config) {
     const projectRoot = configMod.modRequest.projectRoot;
 
     copiarBuzina(projectRoot);
+    copiarBipeRadio(projectRoot);
     criarModuloOverlay(projectRoot);
     copiarServicoMonitor(projectRoot);
     removerHelperAntigo(projectRoot);
