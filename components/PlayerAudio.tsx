@@ -1,15 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Audio, type AVPlaybackStatus } from 'expo-av';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { formatarDuracao, obterUriAudio } from '../services/audioMotorista';
 
-// Áudios que já tocaram sozinhos nesta sessão (a corrida toca uma vez ao chegar; depois só quando o motorista quiser).
-const reproduzidosAutomaticamente = new Set<string>();
+// Cada toque no play toca o áudio uma vez, do início ao fim; para ouvir de novo, toca-se no play outra vez.
+type Props = { audioId: string; duracaoMs?: number | null; grande?: boolean; cor?: string };
 
-type Props = { audioId: string; duracaoMs?: number | null; grande?: boolean; cor?: string; reproduzirAoAbrir?: boolean };
-
-export default function PlayerAudio({ audioId, duracaoMs, grande = false, cor = '#047857', reproduzirAoAbrir = false }: Props) {
+export default function PlayerAudio({ audioId, duracaoMs, grande = false, cor = '#047857' }: Props) {
   const [estado, setEstado] = useState<'parado' | 'carregando' | 'tocando' | 'erro'>('parado');
   const [posicao, setPosicao] = useState(0);
   const [duracao, setDuracao] = useState(duracaoMs || 0);
@@ -33,13 +31,15 @@ export default function PlayerAudio({ audioId, duracaoMs, grande = false, cor = 
     setPosicao(status.positionMillis);
     if (status.durationMillis) setDuracao(status.durationMillis);
     if (status.didJustFinish) {
+      // stopAsync encerra a reprodução e volta ao início; só setPositionAsync(0) faria o áudio recomeçar sozinho.
+      somRef.current?.stopAsync().catch(() => {});
       setEstado('parado');
       setPosicao(0);
-      somRef.current?.setPositionAsync(0).catch(() => {});
     }
   }, []);
 
   const alternar = useCallback(async () => {
+    if (estado === 'carregando') return;
     try {
       if (estado === 'tocando') {
         await somRef.current?.pauseAsync();
@@ -59,16 +59,6 @@ export default function PlayerAudio({ audioId, duracaoMs, grande = false, cor = 
       if (montadoRef.current) setEstado('erro');
     }
   }, [audioId, estado, aoAtualizar]);
-
-  useEffect(() => {
-    // No navegador o som só pode começar com um toque do usuário.
-    if (!reproduzirAoAbrir || Platform.OS === 'web' || reproduzidosAutomaticamente.has(audioId)) return;
-    reproduzidosAutomaticamente.add(audioId);
-    const espera = setTimeout(() => { alternar(); }, 800);
-    return () => clearTimeout(espera);
-    // Toca só uma vez por áudio, ao abrir.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audioId, reproduzirAoAbrir]);
 
   const tempo = estado === 'tocando' || posicao > 0 ? `${formatarDuracao(posicao)} / ${formatarDuracao(duracao)}` : formatarDuracao(duracao);
   const icone = estado === 'tocando' ? 'pause' : estado === 'erro' ? 'refresh' : 'play';

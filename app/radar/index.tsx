@@ -1425,7 +1425,7 @@ export default function Radar() {
             {corridaRecebida.audioId ? (
               <View style={styles.blocoEndereco}>
                 <Text style={styles.tituloBloco}>{corridaRecebida.etapa === 'Destino' ? '✓ BUSCA CONCLUÍDA · ENDEREÇO NO ÁUDIO' : '🎤 ENDEREÇO NO ÁUDIO DA AGÊNCIA'}</Text>
-                <PlayerAudio audioId={corridaRecebida.audioId} duracaoMs={corridaRecebida.duracaoAudioMs} grande cor={temaAgencia.corPrimaria} reproduzirAoAbrir />
+                <PlayerAudio audioId={corridaRecebida.audioId} duracaoMs={corridaRecebida.duracaoAudioMs} grande cor={temaAgencia.corPrimaria} />
                 <Text style={styles.textoAudioCorrida}>Ouça quantas vezes precisar até finalizar a corrida.</Text>
               </View>
             ) : (
