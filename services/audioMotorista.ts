@@ -1,6 +1,7 @@
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
+import { reservarMicrofone } from './radio/audioFocus';
 import { API_BASE, motoristaFetch, obterTokenMotorista, renovarSessao } from './motoristaApi';
 
 // Áudios de chat e de corrida ficam guardados no celular: o servidor só os mantém até a entrega.
@@ -23,6 +24,13 @@ const OPCOES_GRAVACAO: Audio.RecordingOptions = {
 const FORMATOS_WEB = ['audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
 
 export async function iniciarGravacao(): Promise<GravacaoAtiva> {
+  const liberar = reservarMicrofone('gravacao');
+  try {
+    const gravador = await iniciarGravacaoLivre();
+    return { inicio: gravador.inicio, parar: async () => { try { return await gravador.parar(); } finally { liberar(); } }, cancelar: async () => { try { await gravador.cancelar(); } finally { liberar(); } } };
+  } catch (e) { liberar(); throw e; }
+}
+async function iniciarGravacaoLivre(): Promise<GravacaoAtiva> {
   if (Platform.OS === 'web') return iniciarGravacaoWeb();
   const permissao = await Audio.requestPermissionsAsync();
   if (!permissao.granted) throw new Error('Permita o uso do microfone para gravar o áudio.');
@@ -72,12 +80,13 @@ async function iniciarGravacaoWeb(): Promise<GravacaoAtiva> {
 }
 
 // Envia a gravação e já guarda a cópia no celular. Devolve o id do áudio no servidor.
-export async function enviarGravacao(gravacao: Gravacao): Promise<string> {
+export async function enviarGravacao(gravacao: Gravacao, colegaId?: number): Promise<string> {
   const formulario = new FormData();
   const extensao = gravacao.tipo.includes('webm') ? 'webm' : 'm4a';
   if (gravacao.blob) formulario.append('arquivo', gravacao.blob, `audio.${extensao}`);
   else formulario.append('arquivo', { uri: gravacao.uri, name: `audio.${extensao}`, type: gravacao.tipo } as any);
   formulario.append('duracaoMs', String(Math.round(gravacao.duracaoMs)));
+  if (colegaId) formulario.append('colegaId', String(colegaId));
   const resposta = await motoristaFetch('/api/Audios', { method: 'POST', body: formulario });
   const dados = await resposta.json().catch(() => ({}));
   if (!resposta.ok) throw new Error(dados.mensagem || 'Não foi possível enviar o áudio.');

@@ -9,6 +9,9 @@ import AppOverlay from '../native/AppOverlay';
 import { emitirAvisoRecebido } from '../services/avisos';
 import { DURACAO_MAXIMA_MS, enviarGravacao, formatarDuracao, iniciarGravacao, obterUriAudio, type Gravacao, type GravacaoAtiva } from '../services/audioMotorista';
 import PlayerAudio from './PlayerAudio';
+import ChatColegas from './ChatColegas';
+import { useRadio } from './RadioProvider';
+import { colegaAberto, emitirDireta, guardarDiretas, type MensagemDireta } from '../services/chatDireto';
 import { juntarMensagens as juntar, lerHistoricoLocal, salvarHistoricoLocal, type MensagemChat as Mensagem } from '../services/chatLocal';
 import { API_BASE, motoristaFetch, obterTokenMotorista, observarSessaoEncerrada } from '../services/motoristaApi';
 
@@ -20,7 +23,10 @@ type AudioPendente = Gravacao & { clienteId: string; audioId?: string };
 
 export default function ChatMotorista() {
   const pathname = usePathname();
-  const { chat } = useGlobalSearchParams<{ chat?: string }>();
+  const { chat, colega } = useGlobalSearchParams<{ chat?: string; colega?: string }>();
+  const [abaColegas, setAbaColegas] = useState(false);
+  const [naoLidasColegas, setNaoLidasColegas] = useState(0);
+  const { chamar, estado: radio } = useRadio();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [aberto, setAberto] = useState(false);
@@ -51,6 +57,12 @@ export default function ChatMotorista() {
   const sincronizadoRef = useRef(0);
   const nomeAgenciaRef = useRef('');
   const ativo = pathname.startsWith('/radar');
+  useEffect(() => { if (radio.chamada) { setAberto(false); abertoRef.current = false; } }, [radio.chamada]);
+  useEffect(() => { if (colega && ativo) { setAbaColegas(true); setAberto(true); abertoRef.current = false; } }, [colega, ativo]);
+  useEffect(() => { abertoRef.current = aberto && !abaColegas; }, [aberto, abaColegas]);
+  const carregarColegas = useCallback(async () => {
+    try { const r = await motoristaFetch('/api/ChatDireto/colegas'); if (r.ok) setNaoLidasColegas((await r.json()).reduce((n: number, c: { naoLidas: number }) => n + c.naoLidas, 0)); } catch { /* consulta posterior recupera */ }
+  }, []);
   const tituloNotificacao = () => `Mensagem - ${nomeAgenciaRef.current || 'Agência'}`;
 
   const ler = useCallback(async (ateId: number) => {
@@ -146,6 +158,15 @@ export default function ChatMotorista() {
       else carregar();
     });
     conexao.on('AvisoMotorista', emitirAvisoRecebido);
+    conexao.on('ChatDiretaMensagem', async (m: MensagemDireta) => {
+      const eu = Number(motoristaIdRef.current || await AsyncStorage.getItem('idMotorista'));
+      if (m.remetenteMotoristaId !== eu && m.destinatarioMotoristaId !== eu) return;
+      const idColega = m.remetenteMotoristaId === eu ? m.destinatarioMotoristaId : m.remetenteMotoristaId;
+      if (eu) guardarDiretas(eu, idColega, [m]).catch(() => {});
+      if (m.audioId) obterUriAudio(m.audioId).catch(() => {});
+      emitirDireta(m); carregarColegas();
+      if (m.destinatarioMotoristaId === eu && (colegaAberto() !== idColega || AppState.currentState !== 'active')) AppOverlay.notifyMessage(`direta-${idColega}-${m.id}`, 'Mensagem de motorista', m.texto).catch(() => {});
+    });
     conexao.onreconnecting(() => setConectado(false));
     conexao.onreconnected(() => { setConectado(true); carregar(); });
     const iniciar = async () => {
@@ -168,18 +189,19 @@ export default function ChatMotorista() {
       historicoProntoRef.current = true;
       carregar();
     })();
-    iniciar();
-    const intervalo = setInterval(() => { if (AppState.currentState === 'active') carregar(); }, 15000);
+    iniciar(); carregarColegas();
+    const intervalo = setInterval(() => { if (AppState.currentState === 'active') { carregar(); carregarColegas(); } }, 15000);
     const estado = AppState.addEventListener('change', s => { if (s === 'active') carregar(); });
     return () => { encerrado = true; cicloRef.current = ciclo + 1; clearInterval(intervalo); clearTimeout(tentativa); estado.remove(); conexao.stop(); setConectado(false); };
-  }, [ativo, carregar, ler]);
+  }, [ativo, carregar, ler, carregarColegas]);
 
   useEffect(() => {
-    if (pathname === '/radar/suporte' || (ativo && chat === '1')) { setAberto(true); abertoRef.current = true; acompanharRef.current = true; carregar(); }
+    if (pathname === '/radar/suporte' || (ativo && chat === '1')) { setAbaColegas(false); setAberto(true); abertoRef.current = true; acompanharRef.current = true; carregar(); }
     if (!ativo) {
       setAberto(false); abertoRef.current = false; setMensagens([]); setTexto(''); setNaoLidas(0); pendenteRef.current = null; inicializadoRef.current = false; conhecidoRef.current = 0;
       historicoProntoRef.current = false; sincronizadoRef.current = 0; motoristaIdRef.current = null; nomeAgenciaRef.current = ''; setNomeAgencia('');
       gravadorRef.current?.cancelar().catch(() => {}); gravadorRef.current = null; setGravando(false); setAudioPendente(null);
+      setAbaColegas(false); setNaoLidasColegas(0);
     }
   }, [pathname, ativo, chat, carregar]);
 
@@ -258,24 +280,39 @@ export default function ChatMotorista() {
     finally { setCarregando(false); }
   }
 
+  async function biparAgencia() {
+    try {
+      const r = await motoristaFetch('/api/Radio/config'); if (!r.ok) throw new Error('Não foi possível consultar o rádio.');
+      const c = await r.json();
+      if (!c.podeChamarAgencia) throw new Error('Você pode chamar a agência no rádio durante uma corrida. O chat está sempre disponível.');
+      chamar('Agencia', c.eu.agenciaId);
+    } catch (e) { setErro((e as Error).message); }
+  }
+
   if (!ativo) return null;
   return <>
-    <Pressable accessibilityRole="button" accessibilityLabel={`Conversar com a agência, ${naoLidas} mensagens não lidas`} style={[styles.fab, { bottom: insets.bottom + 22 }]} onPress={() => {
+    <Pressable accessibilityRole="button" accessibilityLabel={`Conversas, ${naoLidas + naoLidasColegas} mensagens não lidas`} style={[styles.fab, { bottom: insets.bottom + 22 }]} onPress={() => {
       abertoRef.current = true; acompanharRef.current = true; setAberto(true); carregar(); setTimeout(() => scrollRef.current?.scrollToEnd({ animated: false }), 100);
     }}>
       <Ionicons name="chatbubbles-outline" size={26} color="#fff" />
-      {naoLidas > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{naoLidas > 99 ? '99+' : naoLidas}</Text></View>}
+      {naoLidas + naoLidasColegas > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{naoLidas + naoLidasColegas > 99 ? '99+' : naoLidas + naoLidasColegas}</Text></View>}
     </Pressable>
-    <Modal visible={aberto} transparent animationType="slide" statusBarTranslucent navigationBarTranslucent onRequestClose={fechar}>
+    <Modal visible={aberto && !radio.chamada && !radio.preparando && !radio.erro} transparent animationType="slide" statusBarTranslucent navigationBarTranslucent onRequestClose={fechar}>
       {/* O teclado empurra a conversa para cima (Android e iPhone), mantendo o campo de digitação visível. */}
       <KeyboardAvoidingView style={styles.overlay} behavior={Platform.OS === 'web' ? undefined : 'padding'}>
         <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Fechar conversa" onPress={fechar} />
         <View style={[styles.panel, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           <View style={styles.header}>
             <View style={styles.avatar}><Ionicons name="headset-outline" size={24} color="#047857" /></View>
-            <View style={{ flex: 1 }}><Text style={styles.title} numberOfLines={1}>{nomeAgencia || 'Sua agência'}</Text><Text style={styles.subtitle}>{conectado ? 'Conversa em tempo real' : 'Reconectando conversa…'}</Text></View>
+            <View style={{ flex: 1 }}><Text style={styles.title} numberOfLines={1}>{abaColegas ? 'Motoristas' : nomeAgencia || 'Sua agência'}</Text><Text style={styles.subtitle}>{conectado ? 'Conversa em tempo real' : 'Reconectando conversa…'}</Text></View>
+            {!abaColegas && <Pressable accessibilityRole="button" accessibilityLabel="Bipar para chamar a agência no rádio" onPress={biparAgencia} style={styles.close}><Ionicons name="radio-outline" size={24} color="#047857" /></Pressable>}
             <Pressable accessibilityLabel="Fechar conversa" onPress={fechar} style={styles.close}><Ionicons name="close" size={25} color="#475569" /></Pressable>
           </View>
+          <View style={{ flexDirection: 'row', padding: 8, gap: 8 }}>
+            <Pressable disabled={gravando || !!audioPendente || enviando} onPress={() => { setAbaColegas(false); abertoRef.current = true; carregar(); }} style={{ flex: 1, padding: 12, backgroundColor: !abaColegas ? '#d1fae5' : '#e2e8f0', borderRadius: 14 }}><Text style={{ textAlign: 'center', color: '#065f46', fontWeight: '700' }}>Agência{naoLidas ? ` (${naoLidas})` : ''}</Text></Pressable>
+            <Pressable disabled={gravando || !!audioPendente || enviando} onPress={() => { setAbaColegas(true); abertoRef.current = false; }} style={{ flex: 1, padding: 12, backgroundColor: abaColegas ? '#d1fae5' : '#e2e8f0', borderRadius: 14 }}><Text style={{ textAlign: 'center', color: '#065f46', fontWeight: '700' }}>Motoristas{naoLidasColegas ? ` (${naoLidasColegas})` : ''}</Text></Pressable>
+          </View>
+          {abaColegas ? aberto && <ChatColegas inicial={Number(colega) || undefined} /> : <>
           <ScrollView ref={scrollRef} style={styles.history} contentContainerStyle={styles.messages} keyboardShouldPersistTaps="handled"
             scrollEventThrottle={100} onScroll={({ nativeEvent: e }) => { acompanharRef.current = e.contentSize.height - e.layoutMeasurement.height - e.contentOffset.y < 100; }}
             onContentSizeChange={() => { if (acompanharRef.current) scrollRef.current?.scrollToEnd({ animated: false }); }}
@@ -306,6 +343,7 @@ export default function ChatMotorista() {
               <Pressable accessibilityLabel="Gravar áudio" onPress={gravarAudio} style={styles.send}><Ionicons name="mic" size={24} color="#fff" /></Pressable>
             )}
           </View>
+          </>}
         </View>
       </KeyboardAvoidingView>
     </Modal>

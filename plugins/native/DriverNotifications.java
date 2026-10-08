@@ -23,7 +23,7 @@ public final class DriverNotifications {
         NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager == null) return;
         if (Build.VERSION.SDK_INT >= 26) {
-            NotificationChannel channel = new NotificationChannel(CHANNEL, "Mensagens da agência", NotificationManager.IMPORTANCE_HIGH);
+            NotificationChannel channel = new NotificationChannel(CHANNEL, "Mensagens e rádio", NotificationManager.IMPORTANCE_HIGH);
             channel.setDescription("Mensagens e respostas de suporte, com o som de notificação do celular.");
             channel.setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
                 new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION).build());
@@ -31,6 +31,11 @@ public final class DriverNotifications {
             manager.createNotificationChannel(channel);
         }
         String route = id.startsWith("suporte-") ? "radar/notificacoes" : id.startsWith("jornada-") || id.startsWith("aviso-") ? "radar" : "radar/suporte";
+        if (id.startsWith("radio-")) route = "radar?radio=1";
+        if (id.startsWith("direta-")) {
+            String[] partes = id.split("-");
+            if (partes.length >= 3) route = "radar?colega=" + Uri.encode(partes[1]);
+        }
         Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("appmotorista://" + route));
         intent.setPackage(context.getPackageName());
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);

@@ -212,6 +212,8 @@ import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
 import android.media.AudioAttributes;
 import android.media.AudioManager;
+import android.media.AudioDeviceInfo;
+import android.media.AudioFocusRequest;
 import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Build;
@@ -247,6 +249,17 @@ public class AppOverlayModule extends ReactContextBaseJavaModule {
     private static final Set<MediaPlayer> buzinasAtivas = Collections.synchronizedSet(new HashSet<>());
 
     private final ReactApplicationContext reactContext;
+    private boolean radioAudioAtivo;
+    private int modoAudioAnterior;
+    private boolean altoFalanteAnterior;
+    private AudioFocusRequest radioFocus;
+    private final AudioManager.OnAudioFocusChangeListener radioFocusListener = this::onRadioFocusChange;
+    private void onRadioFocusChange(int change) {
+        if (change < 0 && radioAudioAtivo) {
+            reactContext.getJSModule(com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+                .emit("RadioInterrompido", null);
+        }
+    }
 
     public AppOverlayModule(ReactApplicationContext reactContext) {
         super(reactContext);
@@ -399,6 +412,59 @@ public class AppOverlayModule extends ReactContextBaseJavaModule {
     public void notifyMessage(String id, String title, String text, Promise promise) {
         try { DriverNotifications.show(reactContext, id, title, text); promise.resolve(null); }
         catch (Exception error) { promise.reject("E_MESSAGE_NOTIFICATION", error); }
+    }
+
+    @ReactMethod
+    public void startRadioAudio(Promise promise) {
+        UiThreadUtil.runOnUiThread(() -> {
+            try {
+                if (radioAudioAtivo) { promise.resolve(null); return; }
+                AudioManager audio = (AudioManager) reactContext.getSystemService(Context.AUDIO_SERVICE);
+                int granted;
+                if (Build.VERSION.SDK_INT >= 26) {
+                    radioFocus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                        .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                        .setOnAudioFocusChangeListener(radioFocusListener).build();
+                    granted = audio.requestAudioFocus(radioFocus);
+                } else granted = audio.requestAudioFocus(radioFocusListener, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
+                if (granted != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) throw new IllegalStateException("Outro aplicativo está usando o áudio. Tente novamente após a ligação.");
+                modoAudioAnterior = audio.getMode(); altoFalanteAnterior = audio.isSpeakerphoneOn(); radioAudioAtivo = true;
+                audio.setMode(AudioManager.MODE_IN_COMMUNICATION);
+                if (Build.VERSION.SDK_INT >= 31) {
+                    AudioDeviceInfo escolha = null;
+                    for (AudioDeviceInfo device : audio.getAvailableCommunicationDevices()) {
+                        int type = device.getType();
+                        if (type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || type == AudioDeviceInfo.TYPE_BLE_HEADSET || type == AudioDeviceInfo.TYPE_WIRED_HEADSET || type == AudioDeviceInfo.TYPE_USB_HEADSET) { escolha = device; break; }
+                        if (type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) escolha = device;
+                    }
+                    if (escolha != null) audio.setCommunicationDevice(escolha);
+                } else audio.setSpeakerphoneOn(!audio.isWiredHeadsetOn() && !audio.isBluetoothScoOn());
+                promise.resolve(null);
+            } catch (Exception e) { pararRadioAudio(); promise.reject("E_RADIO_AUDIO", "Não foi possível abrir o áudio do rádio.", e); }
+        });
+    }
+
+    @ReactMethod
+    public void stopRadioAudio(Promise promise) {
+        UiThreadUtil.runOnUiThread(() -> { pararRadioAudio(); promise.resolve(null); });
+    }
+
+    private void pararRadioAudio() {
+        AudioManager audio = (AudioManager) reactContext.getSystemService(Context.AUDIO_SERVICE);
+        if (audio == null) return;
+        if (radioAudioAtivo) {
+            radioAudioAtivo = false;
+            if (Build.VERSION.SDK_INT >= 31) audio.clearCommunicationDevice();
+            else audio.setSpeakerphoneOn(altoFalanteAnterior);
+            audio.setMode(modoAudioAnterior);
+        }
+        if (Build.VERSION.SDK_INT >= 26 && radioFocus != null) { audio.abandonAudioFocusRequest(radioFocus); radioFocus = null; }
+        else audio.abandonAudioFocus(radioFocusListener);
+    }
+
+    @Override public void invalidate() {
+        UiThreadUtil.runOnUiThread(this::pararRadioAudio);
+        super.invalidate();
     }
 
     private boolean temPermissaoSobreposicao() {

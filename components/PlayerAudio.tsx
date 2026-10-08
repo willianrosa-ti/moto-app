@@ -3,6 +3,7 @@ import { Audio, type AVPlaybackStatus } from 'expo-av';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { formatarDuracao, obterUriAudio } from '../services/audioMotorista';
+import { observarMicrofone, radioOcupado } from '../services/radio/audioFocus';
 
 // Cada toque no play toca o áudio uma vez, do início ao fim; para ouvir de novo, toca-se no play outra vez.
 type Props = { audioId: string; duracaoMs?: number | null; grande?: boolean; cor?: string };
@@ -13,6 +14,7 @@ export default function PlayerAudio({ audioId, duracaoMs, grande = false, cor = 
   const [duracao, setDuracao] = useState(duracaoMs || 0);
   const somRef = useRef<Audio.Sound | null>(null);
   const montadoRef = useRef(true);
+  useEffect(() => observarMicrofone((tipo: string | null) => { if (tipo === 'radio') { somRef.current?.pauseAsync().catch(() => {}); setEstado('parado'); } }), []);
 
   // Guarda o áudio no celular assim que ele aparece, mesmo antes de ser ouvido.
   useEffect(() => { obterUriAudio(audioId).catch(() => {}); }, [audioId]);
@@ -39,7 +41,7 @@ export default function PlayerAudio({ audioId, duracaoMs, grande = false, cor = 
   }, []);
 
   const alternar = useCallback(async () => {
-    if (estado === 'carregando') return;
+    if (estado === 'carregando' || radioOcupado()) return;
     try {
       if (estado === 'tocando') {
         await somRef.current?.pauseAsync();
@@ -53,6 +55,7 @@ export default function PlayerAudio({ audioId, duracaoMs, grande = false, cor = 
         if (!montadoRef.current) { await sound.unloadAsync(); return; }
         somRef.current = sound;
       }
+      if (radioOcupado()) return;
       await somRef.current.playAsync();
       setEstado('tocando');
     } catch {

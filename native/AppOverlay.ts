@@ -23,6 +23,8 @@ type AppOverlayNativeModule = {
   playBuzina: () => Promise<void>;
   startRideMonitor: (token: string, apiBase: string, refreshToken: string, radarAtivo: boolean) => Promise<void>;
   notifyMessage: (id: string, title: string, text: string) => Promise<void>;
+  startRadioAudio: () => Promise<void>;
+  stopRadioAudio: () => Promise<void>;
   stopRideMonitor: () => Promise<void>;
   setRideMonitorForeground: (appEmPrimeiroPlano: boolean) => Promise<void>;
 };
@@ -31,6 +33,8 @@ const moduloNativo = NativeModules.AppOverlay as AppOverlayNativeModule | undefi
 const mensagensNotificadas = new Set<string>();
 
 const AppOverlay = {
+  async startRadioAudio() { if (Platform.OS === 'android' && moduloNativo?.startRadioAudio) await moduloNativo.startRadioAudio(); },
+  async stopRadioAudio() { if (Platform.OS === 'android' && moduloNativo?.stopRadioAudio) await moduloNativo.stopRadioAudio(); },
   async isSupported() {
     if (Platform.OS !== 'android' || !moduloNativo) {
       return { isSupported: false };
@@ -85,7 +89,7 @@ const AppOverlay = {
       await moduloNativo.notifyMessage(id, title, text);
     } else if (Platform.OS === 'web' && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       if (mensagensNotificadas.has(id)) return;
-      const destino = id.startsWith('suporte-') ? '/radar/notificacoes' : '/radar?chat=1';
+      const destino = id.startsWith('radio-') ? '/radar?radio=1' : id.startsWith('direta-') ? `/radar?colega=${encodeURIComponent(id.split('-')[1])}` : id.startsWith('suporte-') ? '/radar/notificacoes' : '/radar?chat=1';
       const registration = await navigator.serviceWorker?.getRegistration();
       if (registration) {
         const tag = `chat-${id}`;

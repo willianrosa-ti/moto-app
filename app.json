@@ -2,7 +2,7 @@
   "expo": {
     "name": "app-motorista",
     "slug": "app-motorista",
-    "version": "1.1.1",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "appmotorista",
@@ -21,7 +21,10 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.millin.motorista",
-      "versionCode": 13
+      "versionCode": 14,
+      "blockedPermissions": [
+        "android.permission.CAMERA"
+      ]
     },
     "web": {
       "output": "static",
@@ -48,7 +51,13 @@
       [
         "expo-av",
         {
-          "microphonePermission": "Permita o microfone para enviar mensagens de voz para a agência."
+          "microphonePermission": "Permita o microfone para conversar no rádio e enviar mensagens de voz."
+        }
+      ],
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "microphonePermission": "Permita o microfone para conversar no rádio e enviar mensagens de voz."
         }
       ]
     ],

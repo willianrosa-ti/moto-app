@@ -782,6 +782,23 @@ public class RideMonitorService extends Service {
 
     private void consultarMensagens() throws Exception {
         if (appEmPrimeiroPlano) return;
+        String radioJson = consultarJson("/api/Radio/atual");
+        if (radioJson != null) {
+            JSONObject radio = new JSONObject(radioJson);
+            JSONObject chamada = radio.optJSONObject("chamada");
+            if (chamada != null && radio.optBoolean("recebendo")) {
+                JSONObject origem = chamada.optJSONObject("origem");
+                DriverNotifications.show(this, "radio-" + chamada.optString("id"), "Rádio · " + (origem == null ? "Agência" : origem.optString("nome")), "Bipe! Abra o app para atender.");
+            }
+        }
+        String diretasJson = consultarJson("/api/ChatDireto/novas");
+        if (diretasJson != null) {
+            JSONArray diretas = new JSONArray(diretasJson);
+            for (int i = 0; i < diretas.length(); i++) {
+                JSONObject m = diretas.getJSONObject(i);
+                DriverNotifications.show(this, "direta-" + m.optString("colegaId") + "-" + m.optString("id"), "Mensagem · " + m.optString("nome", "Motorista"), m.optString("texto"));
+            }
+        }
         String json = consultarJson("/api/Chat/mensagens");
         if (json == null) return;
         JSONObject chat = new JSONObject(json);
