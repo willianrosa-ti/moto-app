@@ -191,6 +191,7 @@ public class RideMonitorService extends Service {
     private void consultarCorridasComSeguranca() {
         try {
             if (!renovarTokenSeNecessario()) return;
+            if (!appEmPrimeiroPlano) consultarRadio();
             if (System.currentTimeMillis() - ultimaConsultaMensagens > 12000) {
                 ultimaConsultaMensagens = System.currentTimeMillis();
                 consultarMensagens();
@@ -780,17 +781,24 @@ public class RideMonitorService extends Service {
         } finally { connection.disconnect(); }
     }
 
-    private void consultarMensagens() throws Exception {
-        if (appEmPrimeiroPlano) return;
-        String radioJson = consultarJson("/api/Radio/atual");
-        if (radioJson != null) {
+    // Com o app em segundo plano, o rádio é consultado a cada ciclo para os alertas tocarem na hora.
+    private void consultarRadio() {
+        try {
+            String radioJson = consultarJson("/api/Radio/atual");
+            if (radioJson == null) return;
             JSONObject radio = new JSONObject(radioJson);
             JSONObject chamada = radio.optJSONObject("chamada");
-            if (chamada != null && radio.optBoolean("recebendo")) {
-                JSONObject origem = chamada.optJSONObject("origem");
-                DriverNotifications.show(this, "radio-" + chamada.optString("id"), "Rádio · " + (origem == null ? "Agência" : origem.optString("nome")), "Rádio chamando. Toque para abrir e conectar.");
-            }
-        }
+            if (chamada == null || !radio.optBoolean("recebendo")) return;
+            JSONObject origem = chamada.optJSONObject("origem");
+            String id = chamada.optString("id");
+            int alertas = chamada.optInt("alertas", 0);
+            if (alertas > 0) RadioAlertas.tocar(this, id + ":" + alertas);
+            DriverNotifications.show(this, "radio-" + id, "Rádio · " + (origem == null ? "Agência" : origem.optString("nome")), "Rádio chamando. Toque para abrir e conectar.");
+        } catch (Exception ignorado) { /* Próximo ciclo tenta de novo. */ }
+    }
+
+    private void consultarMensagens() throws Exception {
+        if (appEmPrimeiroPlano) return;
         String diretasJson = consultarJson("/api/ChatDireto/novas");
         if (diretasJson != null) {
             JSONArray diretas = new JSONArray(diretasJson);

@@ -167,11 +167,14 @@ function copiarBuzina(projectRoot) {
 }
 
 function copiarBipeRadio(projectRoot) {
-  const origem = path.join(projectRoot, 'assets', 'sounds', 'pri-radio.mp3');
-  const destino = path.join(projectRoot, 'android', 'app', 'src', 'main', 'res', 'raw', 'pri_radio.mp3');
-  if (!fs.existsSync(origem)) return;
-  fs.mkdirSync(path.dirname(destino), { recursive: true });
-  fs.copyFileSync(origem, destino);
+  // PRI RADIO (apertar para falar) e BIP BIP ALERTA (alerta entre motoristas).
+  for (const [arquivo, recurso] of [['pri-radio.mp3', 'pri_radio.mp3'], ['bip-alerta.mp3', 'bip_alerta.mp3']]) {
+    const origem = path.join(projectRoot, 'assets', 'sounds', arquivo);
+    const destino = path.join(projectRoot, 'android', 'app', 'src', 'main', 'res', 'raw', recurso);
+    if (!fs.existsSync(origem)) continue;
+    fs.mkdirSync(path.dirname(destino), { recursive: true });
+    fs.copyFileSync(origem, destino);
+  }
 }
 
 function copiarServicoMonitor(projectRoot) {
@@ -179,7 +182,7 @@ function copiarServicoMonitor(projectRoot) {
   if (!fs.existsSync(origem)) return;
 
   escreverArquivo(projectRoot, 'RideMonitorService.java', fs.readFileSync(origem, 'utf8'));
-  for (const nome of ['DriverNotifications.java', 'DriverSessionSecrets.java']) {
+  for (const nome of ['DriverNotifications.java', 'DriverSessionSecrets.java', 'RadioAlertas.java']) {
     escreverArquivo(projectRoot, nome, fs.readFileSync(path.join(__dirname, 'native', nome), 'utf8'));
   }
 }
@@ -262,8 +265,10 @@ public class AppOverlayModule extends ReactContextBaseJavaModule {
     private boolean altoFalanteAnterior;
     private AudioFocusRequest radioFocus;
     private final AudioManager.OnAudioFocusChangeListener radioFocusListener = this::onRadioFocusChange;
+    // Só perder o áudio de vez (ligação, outro app de chamada) encerra o rádio. A voz do Waze/Maps
+    // apenas abaixa o som dos outros (LOSS_TRANSIENT_CAN_DUCK) e não derruba a conversa.
     private void onRadioFocusChange(int change) {
-        if (change < 0 && radioAudioAtivo) {
+        if ((change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) && radioAudioAtivo) {
             reactContext.getJSModule(com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter.class)
                 .emit("RadioInterrompido", null);
         }
@@ -359,6 +364,12 @@ public class AppOverlayModule extends ReactContextBaseJavaModule {
                 promise.reject("E_OVERLAY_HIDE", "Nao foi possivel esconder a sobreposicao.", erro);
             }
         });
+    }
+
+    // Alerta de rádio entre motoristas (BIP BIP ALERTA); cada alerta toca uma vez, mesmo se o monitor também o perceber.
+    @ReactMethod
+    public void tocarAlertaRadio(String chave, Promise promise) {
+        promise.resolve(RadioAlertas.tocar(reactContext, chave));
     }
 
     // Bipe do rádio (PRI RADIO) ao apertar para falar. Toca pela mesma saída da conversa (fone ou

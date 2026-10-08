@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const modulo = import('data:text/javascript;base64,' + fs.readFileSync('services/radio/RadioClient.js').toString('base64'));
 const a = { chave: 'Agencia:1', nome: 'Agência' }, b = { chave: 'Motorista:2', nome: 'Piloto' };
-test('abrir app consulta somente presença; voz indisponível não captura microfone', async () => {
+test('abrir app já deixa a credencial de voz pronta; voz indisponível não captura microfone', async () => {
   const { RadioClient } = await modulo;
   const consultas = []; let capturas = 0;
   const hub = { on() {}, onreconnecting() {}, onreconnected() {}, onclose() {}, start: async () => {}, stop: async () => {}, invoke: async () => {} };
@@ -12,7 +12,7 @@ test('abrir app consulta somente presença; voz indisponível não captura micro
     media: { microphone: async () => { capturas++; }, clear() {} },
   });
   try {
-    await client.start(); assert.deepEqual(consultas, [false]);
+    await client.start(); assert.deepEqual(consultas, [false, true]);
     await client.call('Motorista', 2); assert.deepEqual(consultas, [false, true]);
     assert.equal(capturas, 0); assert.equal(client.state.erro, 'Voz indisponível');
   } finally { await client.dispose(); }
@@ -26,7 +26,8 @@ async function fixture() {
   const stream = { getTracks: () => [track], getAudioTracks: () => [track] };
   const client = new RadioClient({ hub, config: async () => ({ eu: a, voz: { habilitado: true, iceServers: [] } }), media: { microphone: async () => stream, clear() {} }, update() {} });
   client.state.eu = a; client.state.conectado = true; client.state.chamada = chamada();
-  client.stream = stream; client.remote = { getAudioTracks: () => [remoto] }; client.pc = { close() {} };
+  // Conversa já conectada: a oferta de conexão já foi feita.
+  client.stream = stream; client.remote = { getAudioTracks: () => [remoto] }; client.pc = { close() {} }; client.offered = true;
   return { client, track, remoto, eventos, log, invoke(fn) { invoke = fn; } };
 }
 test('microfone só abre após receber a vez e fecha imediatamente ao soltar', async () => {
@@ -108,4 +109,36 @@ test('rádio: bipe toca uma vez quando o outro começa a falar', async () => {
   const fala = { falante: b.chave, falaAte: new Date(Date.now() + 20000).toISOString() };
   f.client.receive(chamada({ versao: 2, ...fala })); f.client.receive(chamada({ versao: 3, ...fala }));
   assert.deepEqual(bipes, ['ouvir']); await f.client.dispose();
+});
+test('rádio: alertas tocam no chamado e o terceiro conecta sozinho', async () => {
+  const { RadioClient } = await modulo;
+  const log = [], alertas = [];
+  const track = { enabled: false, stop() {} }, stream = { getTracks: () => [track], getAudioTracks: () => [track] };
+  const hub = { connectionId: 'a', on() {}, onreconnecting() {}, onreconnected() {}, onclose() {}, stop: async () => {},
+    invoke: async (metodo, id, acao) => { log.push(acao || metodo); if (acao === 'Aceitar') return convite({ versao: 9, destinoAparelho: 'a' }); } };
+  const client = new RadioClient({ hub, update() {}, config: async () => ({ eu: a, voz: { habilitado: true, iceServers: [] } }),
+    media: { microphone: async () => stream, clear() {} }, autoAtender: c => (c.alertas || 0) >= 3, aoAlertar: c => alertas.push(c.alertas) });
+  client.state.eu = a; client.state.conectado = true;
+  client.receive(convite({ versao: 1 })); client.receive(convite({ versao: 2, alertas: 1 })); client.receive(convite({ versao: 3, alertas: 2 }));
+  await espera(10); assert.ok(!log.includes('Aceitar'));
+  client.receive(convite({ versao: 4, alertas: 3 })); await espera(10);
+  assert.deepEqual(alertas, [1, 2, 3]); assert.ok(log.includes('Aceitar')); await client.dispose();
+});
+test('rádio: quem chamou envia alerta; microfone abre em paralelo com o convite', async () => {
+  const { RadioClient } = await modulo;
+  const ordem = []; let liberarChamada;
+  const track = { enabled: false, stop() {} }, stream = { getTracks: () => [track], getAudioTracks: () => [track] };
+  const tocando = chamada({ origem: a, destino: b, status: 'Tocando', destinoAparelho: null });
+  const hub = { connectionId: 'a', on() {}, onreconnecting() {}, onreconnected() {}, onclose() {}, stop: async () => {},
+    invoke: async (metodo, id, acao) => { ordem.push(metodo === 'Acao' ? acao : metodo);
+      if (metodo === 'Chamar') return new Promise(resolve => { liberarChamada = () => resolve(tocando); });
+      if (metodo === 'Alertar') return { ...tocando, versao: 2, alertas: 1 }; } };
+  const client = new RadioClient({ hub, update() {}, config: async () => ({ eu: a, voz: { habilitado: true, iceServers: [] } }),
+    media: { microphone: async () => { ordem.push('microfone'); return stream; }, clear() {} } });
+  client.state.eu = a; client.state.conectado = true;
+  const chamando = client.call('Motorista', 2); await espera(10);
+  assert.deepEqual(ordem, ['Chamar', 'microfone']);
+  liberarChamada(); await chamando;
+  await client.alertar(); assert.equal(client.state.chamada.alertas, 1); assert.ok(ordem.includes('Alertar'));
+  await client.dispose();
 });

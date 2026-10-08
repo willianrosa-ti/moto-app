@@ -1,10 +1,11 @@
 // Protocolo compartilhado pelo app e painel; sem dependência de DOM ou React Native.
 export class RadioClient {
-  // autoAtender: quem é chamado conecta sozinho, como num rádio (sem aceitar).
+  // autoAtender(chamada): quem é chamado conecta sozinho, como num rádio (sem aceitar).
   // bipe(tipo): toca o bipe do rádio ('falar' ao apertar, 'ouvir' quando o outro começa a falar);
   // ao apertar, devolve quantos ms o microfone espera para o bipe não ir junto com a voz.
-  constructor({ hub, config, media, update, invite = () => {}, id = uuid, autoAtender = () => false, bipe = () => 0 }) {
-    Object.assign(this, { hub, config, media, update, invite, id, autoAtender, bipe });
+  // aoAlertar(chamada): quem é chamado recebeu um alerta (entre motoristas; no terceiro, conecta).
+  constructor({ hub, config, media, update, invite = () => {}, id = uuid, autoAtender = () => false, bipe = () => 0, aoAlertar = () => {} }) {
+    Object.assign(this, { hub, config, media, update, invite, id, autoAtender, bipe, aoAlertar });
     this.state = { chamada: null, eu: null, conectado: false, preparando: false, erro: '' };
     this.closed = new Set(); this.signals = []; this.ice = []; this.held = false;
     this.serial = Promise.resolve(); this.generation = 0; this.disposed = false;
@@ -23,11 +24,20 @@ export class RadioClient {
       await this.hub.start();
       if (this.disposed) { await this.hub.stop(); return; }
       this.emit({ conectado: true });
+      // Credencial de voz já fica pronta: chamar e conectar não esperam por ela.
+      this.obterVoz().catch(() => {});
       clearInterval(this.heartbeat);
       this.heartbeat = setInterval(() => {
         if (this.state.conectado) this.hub.invoke('Batimento').catch(() => { this.offline(); this.hub.stop(); });
       }, 15000);
     } catch { if (!this.disposed) this.retry = setTimeout(() => this.start(), 5000); }
+  }
+  // Credenciais TURN valem 1 h no servidor; aqui são reaproveitadas por até 20 min.
+  async obterVoz() {
+    if (this.voz && Date.now() - this.voz.em < 20 * 60000) return this.voz.dados;
+    const c = await this.config(true);
+    this.voz = { dados: c.voz, em: Date.now() };
+    return c.voz;
   }
   async prepare() {
     if (this.stream) return;
@@ -35,9 +45,11 @@ export class RadioClient {
     const g = this.generation;
     this.emit({ preparando: true, erro: '' });
     try {
-      const c = await this.config(true);
-      if (!c.voz.habilitado) throw new Error(c.voz.mensagem);
-      this.iceServers = c.voz.iceServers;
+      const voz = await this.obterVoz();
+      if (!voz.habilitado) throw new Error(voz.mensagem);
+      this.iceServers = voz.iceServers;
+      // Começa a reservar o caminho de voz (TURN) enquanto o convite ainda circula.
+      if (!this.pcPrevio && this.media.peer && g === this.generation) this.pcPrevio = this.media.peer({ iceServers: this.iceServers, iceCandidatePoolSize: 1 });
       const stream = await this.media.microphone();
       stream.getAudioTracks().forEach(t => { t.enabled = false; });
       if (g !== this.generation || this.disposed) { stream.getTracks().forEach(t => t.stop()); this.media.clear(); throw new Error('Convite encerrado.'); }
@@ -46,24 +58,38 @@ export class RadioClient {
   }
   async call(perfil, id) {
     if (this.state.chamada || this.state.preparando) return;
-    try { await this.prepare(); this.emit({ preparando: true }); this.receive(await this.hub.invoke('Chamar', perfil, id, this.id())); }
-    catch (e) { this.cleanup(); this.emit({ erro: cleanError(e) }); }
+    try {
+      const voz = await this.obterVoz();
+      if (!voz.habilitado) throw new Error(voz.mensagem);
+      // Microfone e rota de áudio abrem em paralelo com o convite.
+      this.preparo = this.prepare(); this.preparo.catch(() => {});
+      this.emit({ preparando: true });
+      this.receive(await this.hub.invoke('Chamar', perfil, id, this.id()));
+      await this.preparo;
+    } catch (e) { await this.end(); this.emit({ erro: cleanError(e) }); }
     finally { this.emit({ preparando: false }); }
+  }
+  // Entre motoristas: quem chamou envia um alerta (até três) para quem não está no app.
+  async alertar() {
+    const c = this.state.chamada;
+    if (!c || c.status !== 'Tocando' || c.origem.chave !== this.state.eu?.chave) return;
+    try { this.receive(await this.hub.invoke('Alertar', c.id)); }
+    catch (e) { this.emit({ erro: cleanError(e) }); }
   }
   async accept(automatico = false) {
     const c = this.state.chamada;
-    if (!c || c.status !== 'Tocando' || this.state.preparando) return;
-    try { await this.prepare(); }
-    catch (e) {
-      if (this.state.chamada?.id === c.id) { await this.end(); this.emit({ erro: cleanError(e) }); } else this.cleanup();
-      return;
-    }
+    if (!c || c.status !== 'Tocando' || this.state.preparando || this.atendendo === c.id) return;
+    this.atendendo = c.id;
+    // Microfone e rota de áudio abrem em paralelo com o aceite.
+    this.preparo = this.prepare(); this.preparo.catch(() => {});
     try { this.receive(await this.hub.invoke('Acao', c.id, 'Aceitar')); }
     catch (e) {
       // Conexão automática que outro aparelho da mesma conta atendeu primeiro: só fecha aqui, sem aviso.
       if (automatico) { if (this.state.chamada?.id === c.id) { this.closed.add(c.id); this.cleanup(); this.emit({ chamada: null }); } return; }
-      await this.end(); this.emit({ erro: cleanError(e) });
+      await this.end(); this.emit({ erro: cleanError(e) }); return;
     }
+    try { await this.preparo; }
+    catch (e) { if (this.state.chamada?.id === c.id) { await this.end(); this.emit({ erro: cleanError(e) }); } else this.cleanup(); }
   }
   // Ao voltar para o app com uma chamada aguardando, conecta direto.
   atenderPendente() {
@@ -93,9 +119,10 @@ export class RadioClient {
     this.emit({ chamada: e, erro: '' });
     clearTimeout(this.expiry);
     this.expiry = setTimeout(() => this.end('O tempo do rádio terminou.'), Math.max(0, Date.parse(e.expiraEm) - Date.now()));
-    if (nova && e.destino.chave === this.state.eu.chave && e.status === 'Tocando') {
-      this.invite(e);
-      if (this.autoAtender()) this.accept(true);
+    if (e.status === 'Tocando' && e.destino.chave === this.state.eu.chave) {
+      if (nova) this.invite(e);
+      if ((e.alertas || 0) > (current?.alertas || 0)) this.aoAlertar(e);
+      if (this.autoAtender(e)) this.accept(true);
     }
     if (e.status === 'Ativa' && e.falante && e.falante !== this.state.eu.chave && e.falante !== falanteAntes) this.tocarBipe('ouvir');
     this.applyFloor();
@@ -103,7 +130,8 @@ export class RadioClient {
       this.serial = this.serial.then(async () => {
         if (this.state.chamada?.id !== e.id) return;
         await this.connect();
-        if (this.state.chamada?.origemPronta && this.state.chamada?.destinoPronto && e.origem.chave === this.state.eu.chave && !this.offered) {
+        // Quem chamou envia a oferta logo após o aceite; o outro lado guarda os sinais até ficar pronto.
+        if (e.origem.chave === this.state.eu.chave && !this.offered) {
           this.offered = true;
           const offer = await this.pc.createOffer();
           await this.pc.setLocalDescription(offer);
@@ -114,9 +142,12 @@ export class RadioClient {
   }
   async connect() {
     if (this.pc) return;
+    if (!this.stream && this.preparo) await this.preparo;
     if (!this.stream) throw new Error('Microfone indisponível. Faça uma nova chamada.');
+    if (this.pc) return;
     const c = this.state.chamada;
-    const pc = this.pc = this.media.peer({ iceServers: this.iceServers });
+    const pc = this.pc = this.pcPrevio || this.media.peer({ iceServers: this.iceServers });
+    this.pcPrevio = null;
     this.stream.getTracks().forEach(t => pc.addTrack(t, this.stream));
     pc.onicecandidate = ev => {
       if (ev.candidate && this.pc === pc) this.hub.invoke('Sinalizar', c.id, 'ice', JSON.stringify(ev.candidate.toJSON())).catch(e => this.fail(e));
@@ -206,6 +237,7 @@ export class RadioClient {
     clearTimeout(this.floorTimer); clearTimeout(this.expiry); clearTimeout(this.bipeTimer);
     const pc = this.pc; this.pc = null;
     if (pc) { pc.onicecandidate = null; pc.ontrack = null; pc.onconnectionstatechange = null; pc.close(); }
+    this.pcPrevio?.close(); this.pcPrevio = null; this.preparo = null; this.atendendo = null;
     this.stream?.getTracks().forEach(t => t.stop()); this.stream = null;
     this.remote = null; this.media.clear(); this.signals = []; this.ice = []; this.offered = false;
   }

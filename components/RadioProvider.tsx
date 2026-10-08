@@ -23,6 +23,14 @@ function tocarBipeRadio() {
     .catch(() => {});
   return DURACAO_BIPE_MS;
 }
+// BIP BIP ALERTA: no Android toca como alarme (inclusive com o motorista em outro app).
+function tocarAlertaRadio(chave: string) {
+  if (Platform.OS === 'android') AppOverlay.tocarAlertaRadio(chave).catch(() => {});
+  else Audio.Sound.createAsync(require('../assets/sounds/bip-alerta.mp3'), { shouldPlay: true })
+    .then(({ sound }) => sound.setOnPlaybackStatusUpdate(s => { if (s.isLoaded && s.didJustFinish) sound.unloadAsync().catch(() => {}); }))
+    .catch(() => {});
+}
+const ALERTAS_PARA_CONECTAR = 3;
 
 export default function RadioProvider({ children }: { children: React.ReactNode }) {
   const ativo = usePathname().startsWith('/radar');
@@ -33,20 +41,25 @@ export default function RadioProvider({ children }: { children: React.ReactNode 
     const hub = new signalR.HubConnectionBuilder().withUrl(`${API_BASE}/hub-radio`, { accessTokenFactory: async () => await obterTokenMotorista() || '' }).withAutomaticReconnect().build();
     const c = new RadioClient({ hub, media: radioMedia, update: setEstado,
       config: async (voz = false) => { const r = await motoristaFetch(`/api/Radio/config?voz=${voz}`); if (!r.ok) throw new Error('Rádio indisponível.'); return r.json(); },
-      // Rádio não tem "atender": com o app aberto, a conexão é feita na hora.
-      autoAtender: () => AppState.currentState === 'active',
+      // Rádio não tem "atender". A agência conecta sempre, mesmo com o app em segundo plano.
+      // Entre motoristas: conecta na hora com o app aberto; fora do app, depois do terceiro alerta.
+      autoAtender: chamada => chamada.origem.perfil === 'Agencia' || AppState.currentState === 'active' || (chamada.alertas || 0) >= ALERTAS_PARA_CONECTAR,
       bipe: () => tocarBipeRadio(),
+      aoAlertar: chamada => {
+        tocarAlertaRadio(`${chamada.id}:${chamada.alertas}`);
+        Vibration.vibrate([0, 300, 150, 300]);
+      },
       invite: chamada => {
         Vibration.vibrate([0, 180, 100, 180]);
-        if (AppState.currentState !== 'active') AppOverlay.notifyMessage(`radio-${chamada.id}`, `Rádio · ${chamada.origem.nome}`, 'Rádio chamando. Toque para abrir.').catch(() => {});
+        if (AppState.currentState !== 'active') AppOverlay.notifyMessage(`radio-${chamada.id}`, `Rádio · ${chamada.origem.nome}`,
+          chamada.origem.perfil === 'Agencia' ? 'Rádio da agência ligado. Toque para responder.' : 'Rádio chamando. Toque para abrir e conectar.').catch(() => {});
       },
     });
     client.current = c; c.start();
     const audioFocus = DeviceEventEmitter.addListener('RadioInterrompido', () => c.end('Rádio interrompido por outro áudio ou ligação.'));
+    // Sair do app só solta o botão de falar: a voz continua saindo no celular.
     const listener = AppState.addEventListener('change', s => {
-      if (s === 'active') { c.atenderPendente(); return; }
-      c.release();
-      if (c.state.chamada && c.state.chamada.status !== 'Tocando') c.end('Rádio encerrado ao sair do app. Chame novamente para continuar.');
+      if (s === 'active') c.atenderPendente(); else c.release();
     });
     return () => { listener.remove(); audioFocus.remove(); client.current = null; c.dispose(); setEstado(vazio); };
   }, [ativo]);
@@ -54,7 +67,9 @@ export default function RadioProvider({ children }: { children: React.ReactNode 
   const recebendo = chamada?.status === 'Tocando' && chamada.destino.chave === estado.eu?.chave;
   const outro = chamada?.origem.chave === estado.eu?.chave ? chamada?.destino : chamada?.origem;
   const falando = chamada?.falante === estado.eu?.chave && !!chamada?.falante;
-  const texto = chamada?.status === 'Tocando' ? recebendo ? 'Conectando o rádio…' : 'Chamando… conectando o rádio' : chamada?.status === 'Ativa' ? falando ? 'Você está falando' : chamada.falante ? `${outro?.nome} está falando` : 'Canal livre' : 'Conectando áudio…';
+  const alertas = chamada?.alertas || 0;
+  const podeAlertar = chamada?.status === 'Tocando' && !recebendo && chamada.origem.chave === estado.eu?.chave && chamada.destino.perfil === 'Motorista';
+  const texto = chamada?.status === 'Tocando' ? recebendo ? 'Conectando o rádio…' : podeAlertar ? (alertas >= ALERTAS_PARA_CONECTAR ? 'Alerta 3/3 enviado · conectando o rádio…' : 'Chamando… se o colega não estiver no app, envie o alerta') : 'Chamando… conectando o rádio' : chamada?.status === 'Ativa' ? falando ? 'Você está falando' : chamada.falante ? `${outro?.nome} está falando` : 'Canal livre' : 'Conectando áudio…';
   return <RadioContext.Provider value={{ chamar: (perfil, id) => { client.current?.call(perfil, id); }, estado }}>
     {children}
     <Modal transparent visible={ativo && (!!chamada || !!estado.erro || estado.preparando)} animationType="fade" onRequestClose={() => client.current?.end()}>
@@ -64,6 +79,11 @@ export default function RadioProvider({ children }: { children: React.ReactNode 
         {!!chamada && <Text accessibilityLiveRegion="polite" style={s.status}>{texto}</Text>}
         {estado.preparando && <Text style={s.status}>Preparando microfone…</Text>}
         {!!estado.erro && <Text accessibilityRole="alert" style={s.error}>{estado.erro}</Text>}
+        {podeAlertar && alertas < ALERTAS_PARA_CONECTAR && <>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Enviar alerta, ${alertas} de ${ALERTAS_PARA_CONECTAR}`} onPress={() => client.current?.alertar()} style={s.alerta}>
+            <Ionicons name="notifications" size={26} color="#fff" /><Text style={s.white}>Enviar alerta ({alertas}/{ALERTAS_PARA_CONECTAR})</Text>
+          </Pressable><Text style={s.hint}>No 3º alerta o rádio do colega liga sozinho e a sua voz sai no celular dele.</Text>
+        </>}
         {chamada?.status === 'Ativa' && <>
           <Pressable accessibilityRole="button" accessibilityLabel="Segure para falar no rádio" onPressIn={() => client.current?.press()} onPressOut={() => client.current?.release()} onTouchCancel={() => client.current?.release()} style={[s.talk, falando && s.talking]}>
             <Ionicons name="mic" size={38} color="#fff" /><Text style={s.white}>{falando ? 'Falando…' : 'Segure para falar'}</Text>
@@ -80,6 +100,7 @@ const s = StyleSheet.create({
   icon: { width: 70, height: 70, backgroundColor: '#d1fae5', borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
   eyebrow: { fontSize: 11, letterSpacing: 2, color: '#64748b', fontWeight: '700' }, name: { fontSize: 24, fontWeight: '700', color: '#0f172a', textAlign: 'center' },
   status: { color: '#475569', textAlign: 'center' }, error: { color: '#b91c1c', textAlign: 'center' },
+  alerta: { backgroundColor: '#b45309', padding: 18, borderRadius: 18, width: '100%', alignItems: 'center', gap: 6, marginTop: 8 },
   talk: { backgroundColor: '#047857', padding: 26, borderRadius: 24, width: '100%', alignItems: 'center', gap: 10, marginTop: 12 }, talking: { backgroundColor: '#ea580c' },
   white: { color: '#fff', fontWeight: '700', fontSize: 16 }, hint: { color: '#64748b', fontSize: 12, textAlign: 'center' }, end: { padding: 16 }, endText: { color: '#b91c1c', fontWeight: '600' },
 });
