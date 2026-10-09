@@ -112,9 +112,9 @@ export default function Configuracoes() {
                 {NIVEIS_BIPE.map(n => {
                   const marcado = Math.abs(volume - n) < 0.01;
                   return (
-                    <Pressable key={n} accessibilityRole="radio" accessibilityState={{ checked: marcado }} accessibilityLabel={n === 0 ? 'Bipe mudo' : `Bipe ${n * 100}%`}
+                    <Pressable key={n} accessibilityRole="radio" accessibilityState={{ checked: marcado }} accessibilityLabel={n === 0 ? 'Bipe mudo' : `Bipe ${Math.round(n * 100)}%`}
                       onPress={() => escolherVolume(n)} style={[s.nivel, marcado && { backgroundColor: cor, borderColor: cor }]}>
-                      <Text style={[s.nivelTexto, marcado && { color: '#fff' }]}>{n === 0 ? 'Mudo' : `${n * 100}%`}</Text>
+                      <Text style={[s.nivelTexto, marcado && { color: '#fff' }]}>{n === 0 ? 'Mudo' : `${Math.round(n * 100)}%`}</Text>
                     </Pressable>
                   );
                 })}
@@ -142,8 +142,8 @@ const s = StyleSheet.create({
   opcaoTitulo: { fontSize: 15, fontWeight: '700', color: '#0f172a', marginBottom: 2 },
   texto: { fontSize: 13, color: '#64748b', lineHeight: 18 },
   nota: { fontSize: 12, color: '#94a3b8' },
-  niveis: { flexDirection: 'row', gap: 8 },
-  nivel: { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1.5, borderColor: '#cbd5e1', alignItems: 'center' },
+  niveis: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  nivel: { flexGrow: 1, flexBasis: '21%', paddingVertical: 12, borderRadius: 12, borderWidth: 1.5, borderColor: '#cbd5e1', alignItems: 'center' },
   nivelTexto: { fontWeight: '700', color: '#334155' },
   ok: { textAlign: 'center', fontWeight: '700' },
   erro: { color: '#b91c1c', textAlign: 'center' },

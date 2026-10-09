@@ -207,6 +207,17 @@ public class RideMonitorService extends Service {
 
     private void consultarCorridasComSeguranca() {
         try {
+            consultarCiclo();
+        } catch (Exception ignored) {
+        } finally {
+            // Sinal de vida a cada 10 s (reenvia a última posição), também parado, com a tela bloqueada e quando
+            // não há corrida nova para buscar. Junto com o rádio nativo, mantém online quem ligou o app.
+            try { reenviarUltimaLocalizacaoSeNecessario(); } catch (Exception ignored) { }
+        }
+    }
+
+    private void consultarCiclo() {
+        try {
             if (!renovarTokenSeNecessario()) return;
             long agora = System.currentTimeMillis();
             // Garantia do rádio: o rádio nativo recebe chamadas e alertas na hora; esta consulta só cobre uma queda dele.
@@ -268,8 +279,6 @@ public class RideMonitorService extends Service {
                 tocarAlertaCorrida();
             }
         } catch (Exception ignored) {
-        } finally {
-            reenviarUltimaLocalizacaoSeNecessario();
         }
     }
 

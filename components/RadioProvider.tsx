@@ -127,7 +127,7 @@ export default function RadioProvider({ children }: { children: React.ReactNode 
         </>}
         {chamada?.status === 'Ativa' && <>
           <Pressable accessibilityRole="button" accessibilityLabel="Segure para falar no rádio" onPressIn={() => client.current?.press()} onPressOut={() => client.current?.release()} onTouchCancel={() => client.current?.release()} style={[s.talk, falando && s.talking]}>
-            <Ionicons name="mic" size={38} color="#fff" /><Text style={s.white}>{falando ? 'Falando…' : 'Segure para falar'}</Text>
+            <Ionicons name="radio" size={38} color="#fff" /><Text style={s.white}>{falando ? 'Falando…' : 'Segure para falar'}</Text>
           </Pressable><Text style={s.hint}>Espere o bipe para falar · solte para ouvir · até 20 s por fala</Text>
         </>}
         <Pressable style={s.end} onPress={() => client.current?.end()}><Text style={s.endText}>{chamada ? 'Encerrar rádio' : 'Fechar'}</Text></Pressable>

@@ -333,7 +333,7 @@ export default function ChatMotorista() {
             <View style={styles.avatar}><Ionicons name="headset-outline" size={24} color="#047857" /></View>
             <View style={{ flex: 1 }}><Text style={styles.title} numberOfLines={1}>{abaColegas ? (comunicacao ? 'Contatos' : 'Motoristas') : nomeAgencia || 'Sua agência'}</Text><Text style={styles.subtitle}>{conectado ? 'Conversa em tempo real' : 'Reconectando conversa…'}</Text></View>
             {!abaColegas && <Pressable accessibilityRole="button" accessibilityLabel="Enviar alerta para a agência" onPress={alertarAgencia} style={[styles.close, { backgroundColor: '#fee2e2', borderRadius: 14 }]}><IconeAlerta tamanho={20} /></Pressable>}
-            {!abaColegas && <Pressable accessibilityRole="button" accessibilityLabel="Bipar para chamar a agência no rádio" onPress={biparAgencia} style={styles.close}><Ionicons name="radio-outline" size={24} color="#047857" /></Pressable>}
+            {!abaColegas && <Pressable accessibilityRole="button" accessibilityLabel="Chamar a agência no rádio" onPress={biparAgencia} style={styles.close}><Ionicons name="radio-outline" size={24} color="#047857" /></Pressable>}
             <Pressable accessibilityLabel="Fechar conversa" onPress={fechar} style={styles.close}><Ionicons name="close" size={25} color="#475569" /></Pressable>
           </View>
           <View style={{ flexDirection: 'row', padding: 8, gap: 8 }}>
