@@ -124,6 +124,12 @@ public class RadioVozModule extends ReactContextBaseJavaModule {
         super.invalidate();
     }
 
+    // Volume do PRI RADIO, guardado no aparelho (vale também para o rádio com o app fechado).
+    @ReactMethod
+    public void definirVolumeBipe(double volume) {
+        RadioAlertas.definirVolumeBipe(contexto, (float) volume);
+    }
+
     // ---- Ponte com o rádio nativo (RadioNucleo): a tela usa a mesma conexão que funciona com o app fechado. ----
 
     // Liga o rádio nativo (se o serviço ainda não ligou) e espera a conexão; devolve o connectionId.

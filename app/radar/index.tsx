@@ -13,8 +13,9 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import * as Updates from 'expo-updates';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppStateStatus } from 'react-native';
-import { Alert, Animated, AppState, DeviceEventEmitter, Easing, Linking, Modal, PermissionsAndroid, Platform, ScrollView, StatusBar, StyleSheet, Switch, Text, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
+import { Alert, Animated, AppState, Easing, KeyboardAvoidingView, Linking, Modal, PermissionsAndroid, Platform, ScrollView, StatusBar, StyleSheet, Switch, Text, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
 import { avisarAgenciaComunicacao } from '../../services/agenciaComunicacao';
+import ChatColegas from '../../components/ChatColegas';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const ficheiroBuzina = require('../../assets/sounds/buzina.mp3');
@@ -136,7 +137,6 @@ export default function Radar() {
   const comunicacaoRef = useRef(false);
   const [ocupado, setOcupado] = useState(false);
   const [salvandoOcupado, setSalvandoOcupado] = useState(false);
-  const radioOfflineRef = useRef('Nenhum');
   const [valorDiario, setValorDiario] = useState<number>(0); 
   const [mostrarValor, setMostrarValor] = useState(false); 
 
@@ -244,7 +244,6 @@ export default function Radar() {
       const p = await resposta.json();
       preferenciasCarregadas.current = true;
       comunicacaoRef.current = !!p.comunicacao; setComunicacao(!!p.comunicacao); setOcupado(!!p.ocupado);
-      if (p.offline) radioOfflineRef.current = p.offline;
       avisarAgenciaComunicacao(!!p.comunicacao);
       AsyncStorage.setItem('radioOcupado', String(!!p.ocupado)).catch(() => {});
     } catch { /* Sem internet: mantém o que está guardado no aparelho. */ }
@@ -262,7 +261,7 @@ export default function Radar() {
     setOcupado(novo); setSalvandoOcupado(true);
     try {
       const resposta = await motoristaFetch('/api/Radio/preferencias', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ offline: radioOfflineRef.current, ocupado: novo }) });
+        body: JSON.stringify({ ocupado: novo }) });
       if (!resposta.ok) throw new Error();
       AsyncStorage.setItem('radioOcupado', String(novo)).catch(() => {});
     } catch {
@@ -1276,10 +1275,10 @@ export default function Radar() {
                 </TouchableOpacity>
                 
                 {/* Alterado o ícone e chamando a transição MIL-LIN */}
-                <TouchableOpacity style={styles.itemMenu} onPress={() => executarAcaoMenu('suporte')}>
+                {!comunicacao && <TouchableOpacity style={styles.itemMenu} onPress={() => executarAcaoMenu('suporte')}>
                   <Ionicons name="headset-outline" size={20} color={temaAgencia.corPrimaria} />
                   <Text style={styles.textoItemMenu}>SUPORTE TECNICO</Text>
-                </TouchableOpacity>
+                </TouchableOpacity>}
 
                 {/* BOTÃO DE SAIR ADICIONADO AQUI */}
                 <TouchableOpacity style={styles.itemMenuSair} onPress={fazerLogout}>
@@ -1390,23 +1389,20 @@ export default function Radar() {
         </Modal>
       )}
 
+      {/* Conta só de comunicação: a tela principal é a lista de contatos e últimas conversas (tipo WhatsApp). */}
+      {comunicacao ? (
+        <KeyboardAvoidingView style={{ flex: 1, backgroundColor: '#f1f5f9' }} behavior={Platform.OS === 'web' ? undefined : 'padding'}>
+          <WebPwaNotice corPrimaria={temaAgencia.corPrimaria} />
+          {(!statusOnline || ocupado) && (
+            <Text style={{ backgroundColor: ocupado ? '#fef3c7' : '#e2e8f0', color: '#334155', fontSize: 12, paddingVertical: 8, paddingHorizontal: 14, textAlign: 'center' }}>
+              {ocupado ? 'Você está ocupado · em Configurações você escolhe o que recebe assim' : 'Você está offline · em Configurações você escolhe o que recebe assim'}
+            </Text>
+          )}
+          <ChatColegas embutido />
+        </KeyboardAvoidingView>
+      ) : (
       <ScrollView contentContainerStyle={styles.conteudoRadar}>
         <WebPwaNotice corPrimaria={temaAgencia.corPrimaria} />
-
-        {comunicacao && (
-          <View style={{ backgroundColor: '#fff', borderRadius: 20, padding: 22, gap: 12, alignItems: 'center', marginTop: 12, elevation: 2 }}>
-            <Ionicons name="radio-outline" size={44} color={temaAgencia.corPrimaria} />
-            <Text style={{ fontSize: 18, fontWeight: '700', color: '#0f172a', textAlign: 'center' }}>Rádio, áudio e mensagens</Text>
-            <Text style={{ fontSize: 14, color: '#64748b', textAlign: 'center' }}>
-              {!statusOnline ? 'Você está offline. Em Configurações você escolhe se recebe rádio ou alerta assim.' : ocupado ? 'Você está ocupado: ninguém chama você no rádio.' : 'Você está disponível no rádio.'}
-            </Text>
-            <TouchableOpacity accessibilityRole="button" onPress={() => DeviceEventEmitter.emit('abrirConversa', {})}
-              style={{ backgroundColor: temaAgencia.corPrimaria, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 22, flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-              <Ionicons name="chatbubbles-outline" size={20} color="#fff" />
-              <Text style={{ color: '#fff', fontWeight: '700' }}>Abrir conversas</Text>
-            </TouchableOpacity>
-          </View>
-        )}
 
         {!statusOnline && (
           <View style={styles.areaBotaoStatus}>
@@ -1563,6 +1559,7 @@ export default function Radar() {
         )}
 
         </ScrollView>
+      )}
       </View>
     </SafeAreaView>
   );

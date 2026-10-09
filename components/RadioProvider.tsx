@@ -8,6 +8,7 @@ import { RadioClient, type AlertaAvulso, type EstadoRadio } from '../services/ra
 import { radioMedia } from '../services/radio/media';
 import { criarHubNativo, radioNativoDisponivel } from '../services/radio/hubNativo';
 import IconeAlerta from './IconeAlerta';
+import { volumeBipe } from '../services/volumeBipe';
 import AppOverlay from '../native/AppOverlay';
 import { Audio } from 'expo-av';
 
@@ -20,13 +21,18 @@ export const useRadio = () => useContext(RadioContext);
 // Duração do PRI RADIO: o microfone só abre depois do bipe, como num rádio comunicador.
 const DURACAO_BIPE_MS = 650;
 function tocarBipeRadio() {
-  // No Android o bipe é nativo e não toma o foco de áudio (tomar o foco encerraria o rádio).
+  // Volume do bipe nas Configurações; mudo = não toca e o microfone abre na hora.
+  const volume = volumeBipe();
+  if (volume <= 0) return 0;
+  // No Android o bipe é nativo (usa o mesmo volume) e não toma o foco de áudio (tomar o foco encerraria o rádio).
   if (Platform.OS === 'android') AppOverlay.tocarBipeRadio().catch(() => {});
-  else Audio.Sound.createAsync(require('../assets/sounds/pri-radio.mp3'), { shouldPlay: true })
+  else Audio.Sound.createAsync(require('../assets/sounds/pri-radio.mp3'), { shouldPlay: true, volume })
     .then(({ sound }) => sound.setOnPlaybackStatusUpdate(s => { if (s.isLoaded && s.didJustFinish) sound.unloadAsync().catch(() => {}); }))
     .catch(() => {});
   return DURACAO_BIPE_MS;
 }
+// Teste do volume nas Configurações.
+export function tocarBipeTeste() { tocarBipeRadio(); }
 // BIP BIP ALERTA: no Android toca como alarme (inclusive com o motorista em outro app).
 function tocarAlertaRadio(chave: string) {
   if (Platform.OS === 'android') AppOverlay.tocarAlertaRadio(chave).catch(() => {});

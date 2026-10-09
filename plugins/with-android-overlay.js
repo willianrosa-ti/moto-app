@@ -415,6 +415,10 @@ public class AppOverlayModule extends ReactContextBaseJavaModule {
             mediaPlayer.setOnCompletionListener(AppOverlayModule::liberarBuzina);
             mediaPlayer.setOnErrorListener((player, what, extra) -> { liberarBuzina(player); return true; });
             mediaPlayer.prepare();
+            // Volume escolhido nas Configurações (mudo = não toca e o microfone não espera).
+            float volume = RadioAlertas.volumeBipe(reactContext);
+            if (volume <= 0f) { liberarBuzina(mediaPlayer); promise.resolve(0); return; }
+            mediaPlayer.setVolume(volume, volume);
             mediaPlayer.start();
             promise.resolve(mediaPlayer.getDuration());
         } catch (Exception erro) {

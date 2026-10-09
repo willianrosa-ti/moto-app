@@ -30,6 +30,8 @@ export default function ChatMotorista() {
   const [naoLidasColegas, setNaoLidasColegas] = useState(0);
   const { chamar, alertar, estado: radio } = useRadio();
   const comunicacao = useAgenciaComunicacao();
+  const comunicacaoRef = useRef(comunicacao);
+  comunicacaoRef.current = comunicacao;
   const [aviso, setAviso] = useState('');
   useEffect(() => { if (!aviso) return; const t = setTimeout(() => setAviso(''), 2500); return () => clearTimeout(t); }, [aviso]);
   const router = useRouter();
@@ -170,7 +172,7 @@ export default function ChatMotorista() {
       if (eu) guardarDiretas(eu, idColega, [m]).catch(() => {});
       if (m.audioId) obterUriAudio(m.audioId).catch(() => {});
       emitirDireta(m); carregarColegas();
-      if (m.destinatarioMotoristaId === eu && (colegaAberto() !== idColega || AppState.currentState !== 'active')) AppOverlay.notifyMessage(`direta-${idColega}-${m.id}`, 'Mensagem de motorista', m.texto).catch(() => {});
+      if (m.destinatarioMotoristaId === eu && (colegaAberto() !== idColega || AppState.currentState !== 'active')) AppOverlay.notifyMessage(`direta-${idColega}-${m.id}`, comunicacaoRef.current ? 'Nova mensagem' : 'Mensagem de motorista', m.texto).catch(() => {});
     });
     conexao.onreconnecting(() => setConectado(false));
     conexao.onreconnected(() => { setConectado(true); carregar(); });
@@ -313,7 +315,7 @@ export default function ChatMotorista() {
     } catch (e) { setErro((e as Error).message); }
   }
 
-  if (!ativo) return null;
+  if (!ativo || comunicacao) return null;
   return <>
     <Pressable accessibilityRole="button" accessibilityLabel={`Conversas, ${naoLidas + naoLidasColegas} mensagens não lidas`} style={[styles.fab, { bottom: insets.bottom + 22 }]} onPress={() => {
       abertoRef.current = true; acompanharRef.current = true; setAberto(true); carregar(); setTimeout(() => scrollRef.current?.scrollToEnd({ animated: false }), 100);

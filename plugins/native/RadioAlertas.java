@@ -53,8 +53,19 @@ public final class RadioAlertas {
         }
     }
 
+    // Volume do PRI RADIO (Configurações do app), separado do volume da voz: 0 = mudo, 1 = normal.
+    public static float volumeBipe(Context context) {
+        return context.getSharedPreferences("millin_radio", Context.MODE_PRIVATE).getFloat("volumeBipe", 1f);
+    }
+
+    public static void definirVolumeBipe(Context context, float volume) {
+        context.getSharedPreferences("millin_radio", Context.MODE_PRIVATE).edit().putFloat("volumeBipe", Math.max(0f, Math.min(1f, volume))).apply();
+    }
+
     // Bipe do rádio (PRI RADIO) quando o outro começa a falar; sai pela mesma rota da conversa e não pede foco de áudio.
     public static void bipe(Context context) {
+        float volume = volumeBipe(context);
+        if (volume <= 0f) return;
         MediaPlayer player = new MediaPlayer();
         AssetFileDescriptor arquivo = null;
         try {
@@ -69,6 +80,7 @@ public final class RadioAlertas {
             player.setOnCompletionListener(RadioAlertas::liberar);
             player.setOnErrorListener((p, oque, extra) -> { liberar(p); return true; });
             player.prepare();
+            player.setVolume(volume, volume);
             player.start();
         } catch (Exception erro) {
             liberar(player);
