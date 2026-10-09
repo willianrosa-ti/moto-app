@@ -1,8 +1,17 @@
 export type Pessoa = { perfil: string; id: number; agenciaId: number; nome: string; chave: string };
-export type Chamada = { id: string; origem: Pessoa; destino: Pessoa; status: string; falante: string | null; falaAte: string | null; expiraEm: string; versao: number; alertas?: number };
+export type Chamada = { id: string; origem: Pessoa; destino: Pessoa; status: string; falante: string | null; falaAte: string | null; expiraEm: string; versao: number; alertas?: number; servidor?: boolean };
 export type EstadoRadio = { chamada: Chamada | null; eu: Pessoa | null; conectado: boolean; preparando: boolean; erro: string };
+export type PedacoVoz = { fala: number; codec: 'opus' | 'pcmu'; dados: string };
+export type ModoMicrofone = 'parado' | 'pronto' | 'enviando';
+export type MidiaRadio = {
+  abrir(): Promise<void>;
+  microfone(modo: ModoMicrofone, aoPedaco: (p: PedacoVoz) => void): Promise<PedacoVoz | null>;
+  tocar(p: PedacoVoz & { id: string; seq: number }): void;
+  fimFala(): void;
+  clear(): void;
+};
 export class RadioClient {
-  constructor(options: { hub: any; config: (voz?: boolean) => Promise<any>; media: any; update: (state: EstadoRadio) => void; invite?: (c: Chamada) => void;
+  constructor(options: { hub: any; config: () => Promise<any>; media: MidiaRadio; update: (state: EstadoRadio) => void; invite?: (c: Chamada) => void;
     autoAtender?: (c: Chamada) => boolean; bipe?: (tipo: 'falar' | 'ouvir') => number; aoAlertar?: (c: Chamada) => void });
   state: EstadoRadio;
   start(): Promise<void>; call(perfil: string, id: number): Promise<void>; accept(automatico?: boolean): Promise<void>; atenderPendente(): void; alertar(): Promise<void>; end(message?: string): Promise<void>;

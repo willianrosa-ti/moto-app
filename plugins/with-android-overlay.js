@@ -15,6 +15,8 @@ const PERMISSOES_ANDROID = [
   'android.permission.USE_FULL_SCREEN_INTENT',
   'android.permission.VIBRATE',
   'android.permission.WAKE_LOCK',
+  'android.permission.RECORD_AUDIO',
+  'android.permission.MODIFY_AUDIO_SETTINGS',
 ];
 
 function adicionarPermissoes(manifest) {
@@ -182,7 +184,7 @@ function copiarServicoMonitor(projectRoot) {
   if (!fs.existsSync(origem)) return;
 
   escreverArquivo(projectRoot, 'RideMonitorService.java', fs.readFileSync(origem, 'utf8'));
-  for (const nome of ['DriverNotifications.java', 'DriverSessionSecrets.java', 'RadioAlertas.java']) {
+  for (const nome of ['DriverNotifications.java', 'DriverSessionSecrets.java', 'RadioAlertas.java', 'RadioVozModule.java']) {
     escreverArquivo(projectRoot, nome, fs.readFileSync(path.join(__dirname, 'native', nome), 'utf8'));
   }
 }
@@ -195,13 +197,14 @@ import com.facebook.react.bridge.NativeModule;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.uimanager.ViewManager;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
 public class AppOverlayPackage implements ReactPackage {
     @Override
     public List<NativeModule> createNativeModules(ReactApplicationContext reactContext) {
-        return Collections.singletonList(new AppOverlayModule(reactContext));
+        return Arrays.<NativeModule>asList(new AppOverlayModule(reactContext), new RadioVozModule(reactContext));
     }
 
     @Override

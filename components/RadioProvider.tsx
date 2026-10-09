@@ -40,8 +40,8 @@ export default function RadioProvider({ children }: { children: React.ReactNode 
     if (!ativo) return;
     const hub = new signalR.HubConnectionBuilder().withUrl(`${API_BASE}/hub-radio`, { accessTokenFactory: async () => await obterTokenMotorista() || '' }).withAutomaticReconnect().build();
     const c = new RadioClient({ hub, media: radioMedia, update: setEstado,
-      config: async (voz = false) => { const r = await motoristaFetch(`/api/Radio/config?voz=${voz}`); if (!r.ok) throw new Error('Rádio indisponível.'); return r.json(); },
-      // Rádio não tem "atender". A agência conecta sempre, mesmo com o app em segundo plano.
+      config: async () => { const r = await motoristaFetch('/api/Radio/config'); if (!r.ok) throw new Error('Rádio indisponível.'); return r.json(); },
+      // Rádio pelo servidor, sem "atender": a agência conecta sempre, mesmo com o app em segundo plano.
       // Entre motoristas: conecta na hora com o app aberto; fora do app, depois do terceiro alerta.
       autoAtender: chamada => chamada.origem.perfil === 'Agencia' || AppState.currentState === 'active' || (chamada.alertas || 0) >= ALERTAS_PARA_CONECTAR,
       bipe: () => tocarBipeRadio(),
@@ -77,7 +77,7 @@ export default function RadioProvider({ children }: { children: React.ReactNode 
         <View style={s.icon}><Ionicons name="radio-outline" color="#065f46" size={32} /></View>
         <Text style={s.eyebrow}>RÁDIO PRIVADO</Text><Text style={s.name}>{outro?.nome || 'Rádio'}</Text>
         {!!chamada && <Text accessibilityLiveRegion="polite" style={s.status}>{texto}</Text>}
-        {estado.preparando && <Text style={s.status}>Preparando microfone…</Text>}
+        {estado.preparando && <Text style={s.status}>Abrindo o rádio…</Text>}
         {!!estado.erro && <Text accessibilityRole="alert" style={s.error}>{estado.erro}</Text>}
         {podeAlertar && alertas < ALERTAS_PARA_CONECTAR && <>
           <Pressable accessibilityRole="button" accessibilityLabel={`Enviar alerta, ${alertas} de ${ALERTAS_PARA_CONECTAR}`} onPress={() => client.current?.alertar()} style={s.alerta}>
