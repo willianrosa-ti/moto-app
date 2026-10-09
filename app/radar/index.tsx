@@ -482,7 +482,8 @@ export default function Radar() {
 
   useEffect(() => {
     sincronizarJornada();
-    const timer = setInterval(sincronizarJornada, 15000);
+    // Horário de trabalho e fila: a cada 1 min (a fila já chega na hora pelo aviso de corridas).
+    const timer = setInterval(sincronizarJornada, 60000);
     return () => clearInterval(timer);
   }, []);
 

@@ -48,6 +48,8 @@ export function criarHubNativo(apiBase: string, obterToken: () => Promise<string
       await nativo.hubDesconectar().catch(() => {});
     },
     async invoke(alvo: string, ...argumentos: unknown[]) {
+      // O rádio nativo já manda o sinal de vida a cada 15 s.
+      if (alvo === 'Batimento') return null;
       const resultado = await nativo.hubInvocar(alvo, JSON.stringify(argumentos));
       return resultado == null ? null : JSON.parse(resultado);
     },

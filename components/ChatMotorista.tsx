@@ -197,7 +197,8 @@ export default function ChatMotorista() {
       carregar();
     })();
     iniciar(); carregarColegas();
-    const intervalo = setInterval(() => { if (AppState.currentState === 'active') { carregar(); carregarColegas(); } }, 15000);
+    // Garantia: as mensagens chegam na hora pela conexão em tempo real.
+    const intervalo = setInterval(() => { if (AppState.currentState === 'active') { carregar(); carregarColegas(); } }, 60000);
     const estado = AppState.addEventListener('change', s => { if (s === 'active') carregar(); });
     return () => { encerrado = true; cicloRef.current = ciclo + 1; clearInterval(intervalo); clearTimeout(tentativa); estado.remove(); conexao.stop(); setConectado(false); };
   }, [ativo, carregar, ler, carregarColegas]);

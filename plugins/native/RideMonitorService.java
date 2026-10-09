@@ -77,6 +77,10 @@ public class RideMonitorService extends Service {
     private long ultimaConsultaMensagens = 0;
     private String ultimaVersaoCorridas = null;
     private long ultimaConsultaCompletaCorridas = 0;
+    private String ultimaVersaoMensagens = null;
+    private long ultimaNovidades = 0;
+    private long ultimaConsultaRadio = 0;
+    private long ultimaConsultaJornada = 0;
     private final Set<String> filaConhecida = new HashSet<>();
     private volatile String apiBase = API_BASE_PADRAO;
     private volatile Location ultimaLocalizacao;
@@ -204,15 +208,37 @@ public class RideMonitorService extends Service {
     private void consultarCorridasComSeguranca() {
         try {
             if (!renovarTokenSeNecessario()) return;
-            if (!appEmPrimeiroPlano) consultarRadio();
-            if (System.currentTimeMillis() - ultimaConsultaMensagens > 12000) {
-                ultimaConsultaMensagens = System.currentTimeMillis();
+            long agora = System.currentTimeMillis();
+            // Garantia do rádio: o rádio nativo recebe chamadas e alertas na hora; esta consulta só cobre uma queda dele.
+            if (!appEmPrimeiroPlano && agora - ultimaConsultaRadio > 60000) {
+                ultimaConsultaRadio = agora;
+                consultarRadio();
+            }
+            // "Tem novidade?" (o servidor responde de memória, sem banco): com o radar ligado a cada ciclo, senão a cada 12 s.
+            String[] novidades = null;
+            boolean perguntou = false;
+            if (radarAtivo || agora - ultimaNovidades > 12000) {
+                perguntou = true;
+                ultimaNovidades = agora;
+                novidades = consultarNovidades();
+            }
+            // Mensagens (com o app fora da tela): só quando há novidade ou, por garantia, a cada 2 min.
+            boolean mensagensMudaram = perguntou && (novidades != null
+                ? !java.util.Objects.equals(novidades[1], ultimaVersaoMensagens)
+                : agora - ultimaConsultaMensagens > 12000);
+            if (!appEmPrimeiroPlano && (mensagensMudaram || agora - ultimaConsultaMensagens > 120000)) {
+                ultimaConsultaMensagens = agora;
+                if (novidades != null) ultimaVersaoMensagens = novidades[1];
                 consultarMensagens();
+            }
+            // Horário de trabalho: a cada 1 min com o app fora da tela (com ela aberta, quem confere é o app).
+            if (!appEmPrimeiroPlano && agora - ultimaConsultaJornada > 60000) {
+                ultimaConsultaJornada = agora;
                 consultarJornada();
             }
             if (comunicacaoOnline) manterOnlineComunicacao();
             if (!radarAtivo) return;
-            if (!deveConsultarCorridas()) return;
+            if (!deveConsultarCorridas(novidades != null ? novidades[0] : versaoCorridasAntiga(), agora)) return;
             consultarFila();
         } catch (Exception ignored) { }
         if (!radarAtivo) return;
@@ -818,14 +844,30 @@ public class RideMonitorService extends Service {
         } catch (Exception ignorado) { }
     }
 
-    private boolean deveConsultarCorridas() {
-        long agora = System.currentTimeMillis();
-        String versao = null;
+    // Versões das corridas e das mensagens deste motorista (memória do servidor). Nulo = servidor antigo ou sem resposta.
+    private String[] consultarNovidades() {
+        try {
+            String json = consultarJson("/api/Motorista/novidades");
+            if (json == null) return null;
+            JSONObject novidades = new JSONObject(json);
+            return new String[] { novidades.optString("corridas", null), novidades.optString("mensagens", null) };
+        } catch (Exception ignorado) {
+            return null;
+        }
+    }
+
+    // Servidor sem /novidades: só a versão das corridas.
+    private String versaoCorridasAntiga() {
         try {
             String json = consultarJson("/api/Corrida/versao");
-            if (json != null) versao = new JSONObject(json).optString("versao", null);
-        } catch (Exception ignorado) { }
-        boolean consultar = versao == null || !versao.equals(ultimaVersaoCorridas) || agora - ultimaConsultaCompletaCorridas > 30000;
+            return json == null ? null : new JSONObject(json).optString("versao", null);
+        } catch (Exception ignorado) {
+            return null;
+        }
+    }
+
+    private boolean deveConsultarCorridas(String versao, long agora) {
+        boolean consultar = versao == null || !versao.equals(ultimaVersaoCorridas) || agora - ultimaConsultaCompletaCorridas > 60000;
         if (consultar) {
             ultimaVersaoCorridas = versao;
             ultimaConsultaCompletaCorridas = agora;

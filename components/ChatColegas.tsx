@@ -77,7 +77,8 @@ export default function ChatColegas({ inicial, embutido = false }: { inicial?: n
   useEffect(() => { AsyncStorage.getItem('idMotorista').then(id => setEu(Number(id))); }, []);
   useEffect(() => { if (inicial) setSelecionado(inicial); }, [inicial]);
   const contatos = useCallback(() => api('/colegas').then(setColegas).catch(e => setErro(e.message)), []);
-  useEffect(() => { contatos(); const t = setInterval(contatos, 15000); return () => clearInterval(t); }, [contatos]);
+  // Garantia a cada 1 min: mensagens novas já atualizam a lista na hora.
+  useEffect(() => { contatos(); const t = setInterval(contatos, 60000); return () => clearInterval(t); }, [contatos]);
   // Lista: atualiza quando chega mensagem de qualquer contato (a última conversa sobe para o topo).
   useEffect(() => observarDiretas(() => { setTimeout(contatos, 300); }), [contatos]);
   // Últimas conversas guardadas no aparelho (o servidor apaga as antigas).
@@ -139,7 +140,7 @@ export default function ChatColegas({ inicial, embutido = false }: { inicial?: n
       } catch (e) { if (versao === ciclo.current) setErro((e as Error).message); }
       finally { ocupado = false; }
     }
-    carregar(); const timer = setInterval(carregar, 10000);
+    carregar(); const timer = setInterval(carregar, 30000);
     const app = AppState.addEventListener('change', s => { if (s === 'active') carregar(); });
     const off = observarDiretas(m => {
       const colega = m.remetenteMotoristaId === eu ? m.destinatarioMotoristaId : m.remetenteMotoristaId;
