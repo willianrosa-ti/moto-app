@@ -189,3 +189,9 @@ test('rádio: alerta avulso vai pelo hub e chega pelo evento', async () => {
   f.invoke = async () => { throw new Error('HubException: Aguarde um instante para enviar outro alerta.'); };
   await assert.rejects(f.client.alertarAvulso('Agencia', 1), /Aguarde um instante/); await f.client.dispose();
 });
+test('rádio: ao abrir, retoma a conversa que o rádio nativo atendeu com o app fechado', async () => {
+  const f = await cliente({ invoke: async metodo => metodo === 'Atual' ? chamada({ versao: 7, origem: b, destino: a, origemAparelho: 'x', destinoAparelho: 'a' }) : undefined });
+  await f.client.start(); await espera(5);
+  assert.equal(f.client.state.chamada?.status, 'Ativa'); assert.equal(f.media.aberturas, 1);
+  assert.ok(f.log.includes('Atual')); await f.client.dispose();
+});

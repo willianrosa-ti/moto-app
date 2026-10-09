@@ -21,7 +21,7 @@ type AppOverlayNativeModule = {
   showOverlay: (label: string) => Promise<void>;
   hideOverlay: () => Promise<void>;
   playBuzina: () => Promise<void>;
-  startRideMonitor: (token: string, apiBase: string, refreshToken: string, radarAtivo: boolean) => Promise<void>;
+  startRideMonitor: (token: string, apiBase: string, refreshToken: string, radarAtivo: boolean, comunicacaoOnline: boolean) => Promise<void>;
   notifyMessage: (id: string, title: string, text: string) => Promise<void>;
   startRadioAudio: () => Promise<void>;
   tocarBipeRadio: () => Promise<number>;
@@ -83,9 +83,9 @@ const AppOverlay = {
     return true;
   },
 
-  async startRideMonitor(token: string, apiBase: string, refreshToken = '', radarAtivo = true) {
+  async startRideMonitor(token: string, apiBase: string, refreshToken = '', radarAtivo = true, comunicacaoOnline = false) {
     if (Platform.OS !== 'android' || !moduloNativo) return;
-    await moduloNativo.startRideMonitor(token, apiBase, refreshToken, radarAtivo);
+    await moduloNativo.startRideMonitor(token, apiBase, refreshToken, radarAtivo, comunicacaoOnline);
   },
 
   async notifyMessage(id: string, title: string, text: string) {

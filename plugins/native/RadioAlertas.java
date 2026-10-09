@@ -53,6 +53,30 @@ public final class RadioAlertas {
         }
     }
 
+    // Bipe do rádio (PRI RADIO) quando o outro começa a falar; sai pela mesma rota da conversa e não pede foco de áudio.
+    public static void bipe(Context context) {
+        MediaPlayer player = new MediaPlayer();
+        AssetFileDescriptor arquivo = null;
+        try {
+            player.setAudioAttributes(new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build());
+            arquivo = context.getResources().openRawResourceFd(R.raw.pri_radio);
+            if (arquivo == null) return;
+            player.setDataSource(arquivo.getFileDescriptor(), arquivo.getStartOffset(), arquivo.getLength());
+            ativos.add(player);
+            player.setOnCompletionListener(RadioAlertas::liberar);
+            player.setOnErrorListener((p, oque, extra) -> { liberar(p); return true; });
+            player.prepare();
+            player.start();
+        } catch (Exception erro) {
+            liberar(player);
+        } finally {
+            if (arquivo != null) try { arquivo.close(); } catch (Exception ignorado) { }
+        }
+    }
+
     private static void liberar(MediaPlayer player) {
         if (player == null) return;
         ativos.remove(player);

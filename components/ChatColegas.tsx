@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, AppState, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { motoristaFetch } from '../services/motoristaApi';
@@ -8,6 +8,8 @@ import { DURACAO_MAXIMA_MS, enviarGravacao, formatarDuracao, iniciarGravacao, ob
 import { uuid } from '../services/radio/RadioClient';
 import { useRadio } from './RadioProvider';
 import PlayerAudio from './PlayerAudio';
+import IconeAlerta from './IconeAlerta';
+import { useAgenciaComunicacao } from '../services/agenciaComunicacao';
 
 // radio: "radio" (pode bipar), "alerta" (só alerta), "ocupado" ou "nenhum".
 type Colega = { id: number; nome: string; online: boolean; naoLidas: number; radio?: string };
@@ -36,6 +38,29 @@ export default function ChatColegas({ inicial }: { inicial?: number }) {
   const gravador = useRef<GravacaoAtiva | null>(null), pendente = useRef<{ texto: string; id: string } | null>(null);
   const trava = useRef(false), ciclo = useRef(0), scroll = useRef<ScrollView>(null);
   const { chamar, alertar } = useRadio();
+  // Conta só de comunicação: aparecem só os contatos (quem você adicionou ou quem adicionou você).
+  const comunicacao = useAgenciaComunicacao();
+  const [adicionando, setAdicionando] = useState(false);
+  const [novoTelefone, setNovoTelefone] = useState(''); const [novoApelido, setNovoApelido] = useState('');
+  async function adicionarContato() {
+    setEnviando(true);
+    try {
+      const r = await motoristaFetch('/api/ChatDireto/contatos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telefone: novoTelefone, apelido: novoApelido }) });
+      const dados = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(dados.mensagem || 'Não foi possível adicionar o contato.');
+      setAviso(dados.mensagem || 'Contato adicionado.'); setErro(''); setAdicionando(false); setNovoTelefone(''); setNovoApelido('');
+      contatos();
+    } catch (e) { setErro((e as Error).message); }
+    finally { setEnviando(false); }
+  }
+  function removerContato(c: Colega) {
+    const remover = async () => {
+      try { const r = await motoristaFetch(`/api/ChatDireto/contatos/${c.id}`, { method: 'DELETE' }); if (!r.ok) throw new Error(); contatos(); }
+      catch { setErro('Não foi possível remover o contato.'); }
+    };
+    if (Platform.OS === 'web') { remover(); return; }
+    Alert.alert('Remover contato', `Remover ${c.nome} dos seus contatos? Vocês deixam de se ver no chat e no rádio.`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Remover', style: 'destructive', onPress: remover }]);
+  }
   useEffect(() => { if (!aviso) return; const t = setTimeout(() => setAviso(''), 2500); return () => clearTimeout(t); }, [aviso]);
   const enviarAlerta = (id: number) => alertar('Motorista', id).then(m => { setErro(''); setAviso(m || 'Alerta enviado.'); }).catch(e => setErro((e as Error).message));
   useEffect(() => { AsyncStorage.getItem('idMotorista').then(id => setEu(Number(id))); }, []);
@@ -115,15 +140,25 @@ export default function ChatColegas({ inicial }: { inicial?: number }) {
   }
   const colega = colegas.find(c => c.id === selecionado);
   if (!selecionado) return <View style={s.root}>
-    <TextInput style={s.search} accessibilityLabel="Buscar colega" placeholder="Buscar motorista…" value={busca} onChangeText={setBusca} />
-    <ScrollView>{colegas.filter(c => c.nome.toLowerCase().includes(busca.toLowerCase())).map(c => <Pressable key={c.id} style={s.contact} onPress={() => setSelecionado(c.id)}>
+    <View style={s.barraBusca}>
+      <TextInput style={[s.search, { flex: 1 }]} accessibilityLabel={comunicacao ? 'Buscar contato' : 'Buscar colega'} placeholder={comunicacao ? 'Buscar contato…' : 'Buscar motorista…'} value={busca} onChangeText={setBusca} />
+      {comunicacao && <Pressable accessibilityRole="button" accessibilityLabel="Adicionar contato" onPress={() => setAdicionando(a => !a)} style={s.adicionar}><Ionicons name={adicionando ? 'close' : 'person-add-outline'} size={22} color="#fff" /></Pressable>}
+    </View>
+    {comunicacao && adicionando && <View style={s.formContato}>
+      <Text style={s.small}>Peça ao contato o telefone e o apelido (ou placa) que ele usa para entrar no app.</Text>
+      <TextInput style={s.campo} placeholder="Telefone" keyboardType="phone-pad" value={novoTelefone} onChangeText={setNovoTelefone} accessibilityLabel="Telefone do contato" />
+      <TextInput style={s.campo} placeholder="Apelido ou placa" autoCapitalize="characters" value={novoApelido} onChangeText={setNovoApelido} accessibilityLabel="Apelido ou placa do contato" />
+      <Pressable accessibilityRole="button" disabled={enviando || !novoTelefone.trim() || !novoApelido.trim()} onPress={adicionarContato} style={[s.botaoAdicionar, (enviando || !novoTelefone.trim() || !novoApelido.trim()) && { opacity: 0.5 }]}><Text style={s.textoBotao}>{enviando ? 'Adicionando…' : 'Adicionar contato'}</Text></Pressable>
+    </View>}
+    {!!aviso && <Text accessibilityLiveRegion="polite" style={s.aviso}>{aviso}</Text>}
+    <ScrollView>{colegas.filter(c => c.nome.toLowerCase().includes(busca.toLowerCase())).map(c => <Pressable key={c.id} style={s.contact} onPress={() => setSelecionado(c.id)} onLongPress={comunicacao ? () => removerContato(c) : undefined} delayLongPress={600}>
       <View style={s.avatar}><Ionicons name="person-outline" size={22} color="#047857" /></View><View style={{ flex: 1 }}><Text style={s.name}>{c.nome}</Text><Text style={s.small}>{situacao(c)}</Text></View>{c.naoLidas > 0 && <Text style={s.unread}>{c.naoLidas}</Text>}
-    </Pressable>)}{!colegas.length && <Text style={s.empty}>Os motoristas da sua agência aparecerão aqui.</Text>}</ScrollView>
+    </Pressable>)}{!colegas.length && <Text style={s.empty}>{comunicacao ? 'Nenhum contato ainda. Toque em + para adicionar pelo telefone e apelido.' : 'Os motoristas da sua agência aparecerão aqui.'}</Text>}{comunicacao && colegas.length > 0 && <Text style={s.dica}>Segure um contato para removê-lo.</Text>}</ScrollView>
     {!!erro && <Text style={s.error}>{erro}</Text>}
   </View>;
   return <View style={s.root}>
     <View style={s.header}><Pressable accessibilityLabel="Voltar aos motoristas" disabled={enviando} onPress={() => setSelecionado(null)}><Ionicons name="arrow-back" size={24} color="#334155" /></Pressable><Text style={[s.name, { flex: 1 }]}>{colega?.nome || 'Motorista'}</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="Enviar alerta" disabled={enviando || !['radio', 'alerta'].includes(disponibilidade(colega))} onPress={() => enviarAlerta(selecionado)} style={[s.alertBtn, !['radio', 'alerta'].includes(disponibilidade(colega)) && { opacity: 0.4 }]}><Ionicons name="notifications-outline" size={20} color="#b45309" /></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Enviar alerta" disabled={enviando || !['radio', 'alerta'].includes(disponibilidade(colega))} onPress={() => enviarAlerta(selecionado)} style={[s.alertBtn, !['radio', 'alerta'].includes(disponibilidade(colega)) && { opacity: 0.4 }]}><IconeAlerta tamanho={20} /></Pressable>
       <Pressable accessibilityRole="button" accessibilityLabel="Bipar para chamar no rádio" disabled={enviando || disponibilidade(colega) !== 'radio'} onPress={() => chamar('Motorista', selecionado)} style={[s.beep, disponibilidade(colega) !== 'radio' && { opacity: 0.4 }]}><Ionicons name="radio-outline" size={20} color="#047857" /><Text style={s.beepText}>Bipar</Text></Pressable>
     </View>
     {colega && <Text style={s.situacao}>{situacao(colega)}</Text>}
@@ -143,4 +178,4 @@ export default function ChatColegas({ inicial }: { inicial?: number }) {
     </View>
   </View>;
 }
-const s = StyleSheet.create({ root: { flex: 1 }, search: { margin: 12, padding: 14, backgroundColor: '#e2e8f0', borderRadius: 16, color: '#0f172a' }, contact: { flexDirection: 'row', padding: 16, gap: 12, alignItems: 'center' }, avatar: { backgroundColor: '#d1fae5', padding: 12, borderRadius: 18 }, name: { fontSize: 15, fontWeight: '700', color: '#0f172a' }, small: { fontSize: 12, color: '#64748b', marginTop: 3 }, unread: { backgroundColor: '#047857', color: '#fff', padding: 6, borderRadius: 10 }, header: { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 12, backgroundColor: '#fff' }, beep: { flexDirection: 'row', padding: 10, gap: 5, backgroundColor: '#d1fae5', borderRadius: 14 }, beepText: { color: '#047857', fontWeight: '700' }, alertBtn: { padding: 10, backgroundColor: '#fef3c7', borderRadius: 14 }, situacao: { fontSize: 12, color: '#64748b', paddingHorizontal: 16, paddingBottom: 6, backgroundColor: '#fff' }, aviso: { color: '#047857', fontSize: 12, paddingHorizontal: 16, paddingVertical: 6, backgroundColor: '#ecfdf5' }, messages: { padding: 16, gap: 10 }, bubble: { padding: 12, borderRadius: 18, maxWidth: '90%' }, sent: { alignSelf: 'flex-end', backgroundColor: '#d1fae5' }, received: { alignSelf: 'flex-start', backgroundColor: '#fff' }, text: { color: '#0f172a', fontSize: 15 }, time: { color: '#64748b', fontSize: 10, textAlign: 'right', marginTop: 6 }, empty: { color: '#64748b', padding: 30, textAlign: 'center' }, error: { color: '#b91c1c', padding: 12, fontSize: 12 }, older: { color: '#047857', textAlign: 'center', padding: 10 }, composer: { padding: 12, flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff' }, input: { flex: 1, backgroundColor: '#f1f5f9', maxHeight: 100, padding: 12, borderRadius: 18, color: '#0f172a' }, send: { backgroundColor: '#047857', borderRadius: 24, padding: 12 } });
+const s = StyleSheet.create({ root: { flex: 1 }, search: { margin: 12, padding: 14, backgroundColor: '#e2e8f0', borderRadius: 16, color: '#0f172a' }, contact: { flexDirection: 'row', padding: 16, gap: 12, alignItems: 'center' }, avatar: { backgroundColor: '#d1fae5', padding: 12, borderRadius: 18 }, name: { fontSize: 15, fontWeight: '700', color: '#0f172a' }, small: { fontSize: 12, color: '#64748b', marginTop: 3 }, unread: { backgroundColor: '#047857', color: '#fff', padding: 6, borderRadius: 10 }, header: { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 12, backgroundColor: '#fff' }, beep: { flexDirection: 'row', padding: 10, gap: 5, backgroundColor: '#d1fae5', borderRadius: 14 }, beepText: { color: '#047857', fontWeight: '700' }, alertBtn: { paddingVertical: 10, paddingHorizontal: 8, backgroundColor: '#fee2e2', borderRadius: 14 }, barraBusca: { flexDirection: 'row', alignItems: 'center', paddingRight: 12 }, adicionar: { backgroundColor: '#047857', borderRadius: 14, padding: 12 }, formContato: { marginHorizontal: 12, marginBottom: 8, padding: 12, gap: 8, backgroundColor: '#fff', borderRadius: 16 }, campo: { backgroundColor: '#f1f5f9', borderRadius: 12, padding: 12, color: '#0f172a' }, botaoAdicionar: { backgroundColor: '#047857', borderRadius: 12, padding: 12, alignItems: 'center' }, textoBotao: { color: '#fff', fontWeight: '700' }, dica: { color: '#94a3b8', fontSize: 11, textAlign: 'center', padding: 10 }, situacao: { fontSize: 12, color: '#64748b', paddingHorizontal: 16, paddingBottom: 6, backgroundColor: '#fff' }, aviso: { color: '#047857', fontSize: 12, paddingHorizontal: 16, paddingVertical: 6, backgroundColor: '#ecfdf5' }, messages: { padding: 16, gap: 10 }, bubble: { padding: 12, borderRadius: 18, maxWidth: '90%' }, sent: { alignSelf: 'flex-end', backgroundColor: '#d1fae5' }, received: { alignSelf: 'flex-start', backgroundColor: '#fff' }, text: { color: '#0f172a', fontSize: 15 }, time: { color: '#64748b', fontSize: 10, textAlign: 'right', marginTop: 6 }, empty: { color: '#64748b', padding: 30, textAlign: 'center' }, error: { color: '#b91c1c', padding: 12, fontSize: 12 }, older: { color: '#047857', textAlign: 'center', padding: 10 }, composer: { padding: 12, flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff' }, input: { flex: 1, backgroundColor: '#f1f5f9', maxHeight: 100, padding: 12, borderRadius: 18, color: '#0f172a' }, send: { backgroundColor: '#047857', borderRadius: 24, padding: 12 } });

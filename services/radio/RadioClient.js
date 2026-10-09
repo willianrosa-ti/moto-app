@@ -18,7 +18,7 @@ export class RadioClient {
     hub.on('RadioVoz', v => this.ouvir(v));
     hub.on('RadioAlertaAvulso', a => { if (!this.disposed) this.aoAlertaAvulso(a); });
     hub.onreconnecting(() => this.offline());
-    hub.onreconnected(() => { this.emit({ conectado: true }); });
+    hub.onreconnected(() => { this.emit({ conectado: true }); this.sincronizar(); });
     hub.onclose(() => { this.offline(); if (!this.disposed) this.retry = setTimeout(() => this.start(), 4000); });
   }
   emit(patch = {}) { this.state = { ...this.state, ...patch }; if (!this.disposed) this.update(this.state); }
@@ -30,11 +30,16 @@ export class RadioClient {
       await this.hub.start();
       if (this.disposed) { await this.hub.stop(); return; }
       this.emit({ conectado: true });
+      this.sincronizar();
       clearInterval(this.heartbeat);
       this.heartbeat = setInterval(() => {
         if (this.state.conectado) this.hub.invoke('Batimento').catch(() => { this.offline(); this.hub.stop(); });
       }, 15000);
     } catch { if (!this.disposed) this.retry = setTimeout(() => this.start(), 5000); }
+  }
+  // Conversa em andamento (ex.: o rádio nativo do Android atendeu com o app fechado): a tela abre no mesmo estado.
+  async sincronizar() {
+    try { const atual = await this.hub.invoke('Atual'); if (atual) this.receive(atual); } catch { /* servidor antigo */ }
   }
   async call(perfil, id) {
     if (this.state.chamada || this.state.preparando) return;
@@ -63,8 +68,10 @@ export class RadioClient {
     this.atendendo = c.id;
     try { this.receive(await this.hub.invoke('Acao', c.id, 'Atender')); }
     catch (e) {
-      // Conexão automática que outro aparelho da mesma conta atendeu primeiro: só fecha aqui, sem aviso.
-      if (automatico) { if (this.state.chamada?.id === c.id) { this.closed.add(c.id); this.cleanup(); this.emit({ chamada: null }); } return; }
+      // Conexão automática que outro aparelho (ou o rádio nativo) atendeu primeiro: sem aviso. Se foi este aparelho,
+      // o estado seguinte do servidor mostra a conversa ativa.
+      this.atendendo = null;
+      if (automatico) { if (this.state.chamada?.id === c.id && this.state.chamada.status === 'Tocando') { this.cleanup(); this.emit({ chamada: null }); } return; }
       await this.end(); this.emit({ erro: cleanError(e) });
     }
   }

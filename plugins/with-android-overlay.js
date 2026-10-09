@@ -17,6 +17,7 @@ const PERMISSOES_ANDROID = [
   'android.permission.WAKE_LOCK',
   'android.permission.RECORD_AUDIO',
   'android.permission.MODIFY_AUDIO_SETTINGS',
+  'android.permission.RECEIVE_BOOT_COMPLETED',
 ];
 
 function adicionarPermissoes(manifest) {
@@ -56,6 +57,20 @@ function adicionarServicoMonitor(manifest) {
   }
 
   aplicacao.service = servicos;
+
+  // Religa o monitor (e o rádio nativo) ao reiniciar o celular ou atualizar o app.
+  const receptores = aplicacao.receiver || [];
+  const nomeReceptor = `${OVERLAY_PACKAGE}.InicioAparelhoReceiver`;
+  if (!receptores.some((r) => r.$?.['android:name'] === nomeReceptor)) {
+    receptores.push({
+      $: { 'android:name': nomeReceptor, 'android:exported': 'true' },
+      'intent-filter': [{ action: [
+        { $: { 'android:name': 'android.intent.action.BOOT_COMPLETED' } },
+        { $: { 'android:name': 'android.intent.action.MY_PACKAGE_REPLACED' } },
+      ] }],
+    });
+  }
+  aplicacao.receiver = receptores;
   return manifest;
 }
 
@@ -77,6 +92,12 @@ function limparMainActivity(caminhoMainActivity) {
   if (!caminhoMainActivity) return;
 
   let conteudo = fs.readFileSync(caminhoMainActivity, 'utf8');
+
+  if (!conteudo.includes('FLAG_KEEP_SCREEN_ON')) {
+    conteudo = conteudo
+      .replace(/(super\.onCreate\(null\)\n)/, '$1    // Tela sempre ligada com o app aberto (o motorista ainda pode apagar no botão de energia).\n    window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)\n')
+      .replace(/(super\.onCreate\(null\);\n)/, '$1    getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);\n');
+  }
 
   conteudo = conteudo
     .replace(/\nimport com\.millin\.motorista\.overlay\.OverlayHelper\n/g, '\n')
@@ -184,7 +205,7 @@ function copiarServicoMonitor(projectRoot) {
   if (!fs.existsSync(origem)) return;
 
   escreverArquivo(projectRoot, 'RideMonitorService.java', fs.readFileSync(origem, 'utf8'));
-  for (const nome of ['DriverNotifications.java', 'DriverSessionSecrets.java', 'RadioAlertas.java', 'RadioVozModule.java']) {
+  for (const nome of ['DriverNotifications.java', 'DriverSessionSecrets.java', 'RadioAlertas.java', 'RadioVozModule.java', 'RadioVozPlayer.java', 'RadioHubCliente.java', 'RadioNucleo.java', 'InicioAparelhoReceiver.java']) {
     escreverArquivo(projectRoot, nome, fs.readFileSync(path.join(__dirname, 'native', nome), 'utf8'));
   }
 }
@@ -415,7 +436,7 @@ public class AppOverlayModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
-    public void startRideMonitor(String token, String apiBase, String refreshToken, boolean radarAtivo, Promise promise) {
+    public void startRideMonitor(String token, String apiBase, String refreshToken, boolean radarAtivo, boolean comunicacaoOnline, Promise promise) {
         if (token == null || token.trim().isEmpty()) {
             promise.reject("E_RIDE_MONITOR_TOKEN", "Token do motorista indisponivel.");
             return;
@@ -428,6 +449,7 @@ public class AppOverlayModule extends ReactContextBaseJavaModule {
             intent.putExtra(RideMonitorService.EXTRA_API_BASE, apiBase);
             intent.putExtra("refreshToken", refreshToken);
             intent.putExtra("radarAtivo", radarAtivo);
+            intent.putExtra("comunicacaoOnline", comunicacaoOnline);
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 reactContext.startForegroundService(intent);

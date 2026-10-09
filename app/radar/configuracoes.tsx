@@ -1,20 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StatusBar, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { motoristaFetch } from '../../services/motoristaApi';
 
-type Offline = 'Radio' | 'Alerta' | 'Nenhum';
+type Offline = 'RadioDireto' | 'Radio' | 'Alerta' | 'Nenhum';
 type Preferencias = { offline: Offline; ocupado: boolean };
 const OPCOES: { valor: Offline; titulo: string; texto: string; icone: keyof typeof Ionicons.glyphMap }[] = [
-  { valor: 'Radio', titulo: 'Receber rádio', texto: 'A agência e os colegas falam com você mesmo offline, com o app aberto ou em segundo plano.', icone: 'radio-outline' },
+  { valor: 'RadioDireto', titulo: 'Receber rádio direto', texto: 'A voz sai na hora, sem precisar de alerta antes, da agência e dos colegas.', icone: 'radio' },
+  { valor: 'Radio', titulo: 'Receber rádio', texto: 'A agência fala direto; os colegas mandam alerta e, no 3º, o rádio liga.', icone: 'radio-outline' },
   { valor: 'Alerta', titulo: 'Receber só o alerta', texto: 'Toca o BIP BIP ALERTA, mas o rádio não abre. Você decide se responde.', icone: 'notifications-outline' },
   { valor: 'Nenhum', titulo: 'Não receber nada', texto: 'Offline, ninguém chama você no rádio nem manda alerta.', icone: 'remove-circle-outline' },
 ];
 
-// Configurações do rádio: o que acontece quando o motorista está offline e o modo Ocupado (salvas no servidor).
+// Configurações do rádio: o que acontece quando o motorista está offline (salvas no servidor). O Ocupado fica no menu Recursos.
 export default function Configuracoes() {
   const navegar = useRouter();
   const [cor, setCor] = useState('#28a745');
@@ -61,16 +62,6 @@ export default function Configuracoes() {
         {!preferencias ? <ActivityIndicator style={{ marginTop: 40 }} size="large" color={cor} /> : (
           <ScrollView contentContainerStyle={s.conteudo}>
             <View style={s.card}>
-              <View style={s.linhaTitulo}>
-                <Ionicons name="hand-left-outline" size={22} color={cor} />
-                <Text style={s.tituloCard}>Ocupado</Text>
-                <Switch value={preferencias.ocupado} disabled={salvando} onValueChange={ocupado => salvar({ ...preferencias, ocupado })}
-                  trackColor={{ true: cor }} accessibilityLabel="Ficar ocupado" />
-              </View>
-              <Text style={s.texto}>Mesmo online, ninguém consegue chamar você no rádio nem mandar alerta. As mensagens do chat continuam chegando.</Text>
-            </View>
-
-            <View style={s.card}>
               <Text style={s.tituloCard}>Rádio quando estiver offline</Text>
               {OPCOES.map(o => {
                 const marcado = preferencias.offline === o.valor;
@@ -86,7 +77,7 @@ export default function Configuracoes() {
                   </Pressable>
                 );
               })}
-              <Text style={s.nota}>Com o app fechado de vez, chega só a notificação.</Text>
+              <Text style={s.nota}>Vale também com o app fechado, enquanto você continuar logado com “Manter conectado”. O Ocupado fica no menu Recursos.</Text>
             </View>
             {!!mensagem && <Text accessibilityLiveRegion="polite" style={[s.ok, { color: cor }]}>{mensagem}</Text>}
             {!!erro && <Text accessibilityRole="alert" style={s.erro}>{erro}</Text>}

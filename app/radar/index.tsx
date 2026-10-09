@@ -13,7 +13,8 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import * as Updates from 'expo-updates';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppStateStatus } from 'react-native';
-import { Alert, Animated, AppState, DeviceEventEmitter, Easing, Linking, Modal, PermissionsAndroid, Platform, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
+import { Alert, Animated, AppState, DeviceEventEmitter, Easing, Linking, Modal, PermissionsAndroid, Platform, ScrollView, StatusBar, StyleSheet, Switch, Text, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
+import { avisarAgenciaComunicacao } from '../../services/agenciaComunicacao';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const ficheiroBuzina = require('../../assets/sounds/buzina.mp3');
@@ -134,6 +135,8 @@ export default function Radar() {
   const [comunicacao, setComunicacao] = useState(false);
   const comunicacaoRef = useRef(false);
   const [ocupado, setOcupado] = useState(false);
+  const [salvandoOcupado, setSalvandoOcupado] = useState(false);
+  const radioOfflineRef = useRef('Nenhum');
   const [valorDiario, setValorDiario] = useState<number>(0); 
   const [mostrarValor, setMostrarValor] = useState(false); 
 
@@ -241,7 +244,9 @@ export default function Radar() {
       const p = await resposta.json();
       preferenciasCarregadas.current = true;
       comunicacaoRef.current = !!p.comunicacao; setComunicacao(!!p.comunicacao); setOcupado(!!p.ocupado);
-      AsyncStorage.multiSet([['agenciaComunicacao', String(!!p.comunicacao)], ['radioOcupado', String(!!p.ocupado)]]).catch(() => {});
+      if (p.offline) radioOfflineRef.current = p.offline;
+      avisarAgenciaComunicacao(!!p.comunicacao);
+      AsyncStorage.setItem('radioOcupado', String(!!p.ocupado)).catch(() => {});
     } catch { /* Sem internet: mantém o que está guardado no aparelho. */ }
   }, []);
   useEffect(() => {
@@ -251,6 +256,21 @@ export default function Radar() {
     }).catch(() => {});
   }, []);
   useFocusEffect(useCallback(() => { carregarPreferenciasRadio(); }, [carregarPreferenciasRadio]));
+
+  // Ocupado direto no menu: mesmo online, ninguém chama no rádio nem manda alerta.
+  const alternarOcupado = async (novo: boolean) => {
+    setOcupado(novo); setSalvandoOcupado(true);
+    try {
+      const resposta = await motoristaFetch('/api/Radio/preferencias', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ offline: radioOfflineRef.current, ocupado: novo }) });
+      if (!resposta.ok) throw new Error();
+      AsyncStorage.setItem('radioOcupado', String(novo)).catch(() => {});
+    } catch {
+      setOcupado(!novo);
+      const mensagem = 'Não foi possível mudar o Ocupado. Verifique a internet.';
+      if (Platform.OS === 'web') setMensagemAvisoWeb(mensagem); else Alert.alert('Rádio', mensagem);
+    } finally { setSalvandoOcupado(false); }
+  };
 
   const executarAcaoMenu = (acao: 'financeiro' | 'notificacoes' | 'suporte' | 'configuracoes') => {
     setMenuAberto(false); // Fecha o menu lateral
@@ -565,7 +585,8 @@ export default function Radar() {
         if (token) {
           await solicitarPermissaoNotificacaoAndroid();
           await AppOverlay.setRideMonitorForeground(estadoAppRef.current === 'active');
-          await AppOverlay.startRideMonitor(token, API_BASE, (await obterRefreshToken()) || '', statusOnline && !comunicacao);
+          // Conta de comunicação: o serviço mantém o "online" e o rádio, sem corridas nem localização.
+          await AppOverlay.startRideMonitor(token, API_BASE, (await obterRefreshToken()) || '', statusOnline && !comunicacao, statusOnline && comunicacao);
         } else {
           await AppOverlay.stopRideMonitor();
         }
@@ -1229,6 +1250,13 @@ export default function Radar() {
                   <Ionicons name="cash-outline" size={20} color={temaAgencia.corPrimaria} />
                   <Text style={styles.textoItemMenu}>FINANCEIRO</Text>
                 </TouchableOpacity>}
+
+                <View style={styles.itemMenu}>
+                  <Ionicons name="hand-left-outline" size={20} color={temaAgencia.corPrimaria} />
+                  <Text style={[styles.textoItemMenu, { flex: 1 }]}>OCUPADO</Text>
+                  <Switch value={ocupado} disabled={salvandoOcupado} onValueChange={alternarOcupado}
+                    trackColor={{ true: temaAgencia.corPrimaria }} accessibilityLabel="Ficar ocupado no rádio" />
+                </View>
 
                 <TouchableOpacity style={styles.itemMenu} onPress={() => executarAcaoMenu('configuracoes')}>
                   <Ionicons name="settings-outline" size={20} color={temaAgencia.corPrimaria} />

@@ -6,6 +6,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { API_BASE, motoristaFetch, obterTokenMotorista } from '../services/motoristaApi';
 import { RadioClient, type AlertaAvulso, type EstadoRadio } from '../services/radio/RadioClient';
 import { radioMedia } from '../services/radio/media';
+import { criarHubNativo, radioNativoDisponivel } from '../services/radio/hubNativo';
+import IconeAlerta from './IconeAlerta';
 import AppOverlay from '../native/AppOverlay';
 import { Audio } from 'expo-av';
 
@@ -41,13 +43,18 @@ export default function RadioProvider({ children }: { children: React.ReactNode 
   const client = useRef<RadioClient | null>(null);
   useEffect(() => {
     if (!ativo) return;
-    const hub = new signalR.HubConnectionBuilder().withUrl(`${API_BASE}/hub-radio`, { accessTokenFactory: async () => await obterTokenMotorista() || '' }).withAutomaticReconnect().build();
+    // Android: a tela usa a conexão do rádio nativo (que funciona com o app fechado). Navegador: SignalR direto.
+    const hub = radioNativoDisponivel
+      ? criarHubNativo(API_BASE, async () => (await obterTokenMotorista()) || '')
+      : new signalR.HubConnectionBuilder().withUrl(`${API_BASE}/hub-radio`, { accessTokenFactory: async () => await obterTokenMotorista() || '' }).withAutomaticReconnect().build();
     const c = new RadioClient({ hub, media: radioMedia, update: setEstado,
       config: async () => { const r = await motoristaFetch('/api/Radio/config'); if (!r.ok) throw new Error('Rádio indisponível.'); return r.json(); },
-      // Rádio pelo servidor, sem "atender": a agência conecta sempre, mesmo com o app em segundo plano.
-      // Entre motoristas: conecta na hora com o app aberto; fora do app, depois do terceiro alerta.
-      autoAtender: chamada => chamada.origem.perfil === 'Agencia' || AppState.currentState === 'active' || (chamada.alertas || 0) >= ALERTAS_PARA_CONECTAR,
-      bipe: () => tocarBipeRadio(),
+      // Rádio sem "atender": com o app aberto conecta na hora. Fora do app, no Android quem conecta é o rádio nativo
+      // (agência, "rádio direto" ou 3º alerta); no navegador, a própria tela.
+      autoAtender: chamada => AppState.currentState === 'active' || (!radioNativoDisponivel &&
+        (chamada.origem.perfil === 'Agencia' || !!chamada.direto || (chamada.alertas || 0) >= ALERTAS_PARA_CONECTAR)),
+      // O bipe de quem começa a falar, no Android, toca pelo rádio nativo.
+      bipe: tipo => tipo === 'ouvir' && radioNativoDisponivel ? 0 : tocarBipeRadio(),
       aoAlertar: chamada => {
         tocarAlertaRadio(`${chamada.id}:${chamada.alertas}`);
         Vibration.vibrate([0, 300, 150, 300]);
@@ -56,12 +63,12 @@ export default function RadioProvider({ children }: { children: React.ReactNode 
       aoAlertaAvulso: alerta => {
         tocarAlertaRadio(`avulso:${alerta.id}`);
         Vibration.vibrate([0, 300, 150, 300]);
-        if (AppState.currentState !== 'active') AppOverlay.notifyMessage(`radio-avulso-${alerta.id}`, `Alerta · ${alerta.de.nome}`, 'Toque para abrir a conversa.').catch(() => {});
+        if (AppState.currentState !== 'active' && !radioNativoDisponivel) AppOverlay.notifyMessage(`radio-avulso-${alerta.id}`, `Alerta · ${alerta.de.nome}`, 'Toque para abrir a conversa.').catch(() => {});
         setAlertaRecebido(alerta);
       },
       invite: chamada => {
         Vibration.vibrate([0, 180, 100, 180]);
-        if (AppState.currentState !== 'active') AppOverlay.notifyMessage(`radio-${chamada.id}`, `Rádio · ${chamada.origem.nome}`,
+        if (AppState.currentState !== 'active' && !radioNativoDisponivel) AppOverlay.notifyMessage(`radio-${chamada.id}`, `Rádio · ${chamada.origem.nome}`,
           chamada.origem.perfil === 'Agencia' ? 'Rádio da agência ligado. Toque para responder.' : 'Rádio chamando. Toque para abrir e conectar.').catch(() => {});
       },
     });
@@ -69,7 +76,8 @@ export default function RadioProvider({ children }: { children: React.ReactNode 
     const audioFocus = DeviceEventEmitter.addListener('RadioInterrompido', () => c.end('Rádio interrompido por outro áudio ou ligação.'));
     // Sair do app só solta o botão de falar: a voz continua saindo no celular.
     const listener = AppState.addEventListener('change', s => {
-      if (s === 'active') c.atenderPendente(); else c.release();
+      // Ao voltar: retoma a conversa que o rádio nativo atendeu e conecta a que estiver chamando.
+      if (s === 'active') { c.sincronizar(); c.atenderPendente(); } else c.release();
     });
     return () => { listener.remove(); audioFocus.remove(); client.current = null; c.dispose(); setEstado(vazio); setAlertaRecebido(null); };
   }, [ativo]);
@@ -90,7 +98,7 @@ export default function RadioProvider({ children }: { children: React.ReactNode 
     {children}
     <Modal transparent visible={ativo && !!alertaRecebido && !chamada} animationType="fade" onRequestClose={() => setAlertaRecebido(null)}>
       <View style={s.backdrop}><View style={s.card} accessibilityViewIsModal>
-        <View style={[s.icon, { backgroundColor: '#fef3c7' }]}><Ionicons name="notifications" color="#b45309" size={32} /></View>
+        <View style={[s.icon, { backgroundColor: '#fee2e2' }]}><IconeAlerta tamanho={30} /></View>
         <Text style={s.eyebrow}>ALERTA</Text><Text style={s.name}>{alertaRecebido?.de.nome || 'Alerta'}</Text>
         <Text style={s.status}>{alertaRecebido?.de.perfil === 'Agencia' ? 'A agência está chamando você.' : 'Seu colega está chamando você.'}</Text>
         <Pressable accessibilityRole="button" onPress={() => alertaRecebido && abrirConversa(alertaRecebido)} style={s.alerta}>
@@ -108,7 +116,7 @@ export default function RadioProvider({ children }: { children: React.ReactNode 
         {!!estado.erro && <Text accessibilityRole="alert" style={s.error}>{estado.erro}</Text>}
         {podeAlertar && alertas < ALERTAS_PARA_CONECTAR && <>
           <Pressable accessibilityRole="button" accessibilityLabel={`Enviar alerta, ${alertas} de ${ALERTAS_PARA_CONECTAR}`} onPress={() => client.current?.alertar()} style={s.alerta}>
-            <Ionicons name="notifications" size={26} color="#fff" /><Text style={s.white}>Enviar alerta ({alertas}/{ALERTAS_PARA_CONECTAR})</Text>
+            <IconeAlerta tamanho={24} cor="#fff" /><Text style={s.white}>Enviar alerta ({alertas}/{ALERTAS_PARA_CONECTAR})</Text>
           </Pressable><Text style={s.hint}>No 3º alerta o rádio do colega liga sozinho e a sua voz sai no celular dele.</Text>
         </>}
         {chamada?.status === 'Ativa' && <>
@@ -127,7 +135,7 @@ const s = StyleSheet.create({
   icon: { width: 70, height: 70, backgroundColor: '#d1fae5', borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
   eyebrow: { fontSize: 11, letterSpacing: 2, color: '#64748b', fontWeight: '700' }, name: { fontSize: 24, fontWeight: '700', color: '#0f172a', textAlign: 'center' },
   status: { color: '#475569', textAlign: 'center' }, error: { color: '#b91c1c', textAlign: 'center' },
-  alerta: { backgroundColor: '#b45309', padding: 18, borderRadius: 18, width: '100%', alignItems: 'center', gap: 6, marginTop: 8 },
+  alerta: { backgroundColor: '#dc2626', padding: 18, borderRadius: 18, width: '100%', alignItems: 'center', gap: 6, marginTop: 8 },
   talk: { backgroundColor: '#047857', padding: 26, borderRadius: 24, width: '100%', alignItems: 'center', gap: 10, marginTop: 12 }, talking: { backgroundColor: '#ea580c' },
   white: { color: '#fff', fontWeight: '700', fontSize: 16 }, hint: { color: '#64748b', fontSize: 12, textAlign: 'center' }, end: { padding: 16 }, endText: { color: '#b91c1c', fontWeight: '600' },
 });

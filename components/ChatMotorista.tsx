@@ -10,6 +10,8 @@ import { emitirAvisoRecebido } from '../services/avisos';
 import { DURACAO_MAXIMA_MS, enviarGravacao, formatarDuracao, iniciarGravacao, obterUriAudio, type Gravacao, type GravacaoAtiva } from '../services/audioMotorista';
 import PlayerAudio from './PlayerAudio';
 import ChatColegas from './ChatColegas';
+import IconeAlerta from './IconeAlerta';
+import { useAgenciaComunicacao } from '../services/agenciaComunicacao';
 import { useRadio } from './RadioProvider';
 import { colegaAberto, emitirDireta, guardarDiretas, type MensagemDireta } from '../services/chatDireto';
 import { juntarMensagens as juntar, lerHistoricoLocal, salvarHistoricoLocal, type MensagemChat as Mensagem } from '../services/chatLocal';
@@ -27,6 +29,7 @@ export default function ChatMotorista() {
   const [abaColegas, setAbaColegas] = useState(false);
   const [naoLidasColegas, setNaoLidasColegas] = useState(0);
   const { chamar, alertar, estado: radio } = useRadio();
+  const comunicacao = useAgenciaComunicacao();
   const [aviso, setAviso] = useState('');
   useEffect(() => { if (!aviso) return; const t = setTimeout(() => setAviso(''), 2500); return () => clearTimeout(t); }, [aviso]);
   const router = useRouter();
@@ -325,14 +328,14 @@ export default function ChatMotorista() {
         <View style={[styles.panel, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           <View style={styles.header}>
             <View style={styles.avatar}><Ionicons name="headset-outline" size={24} color="#047857" /></View>
-            <View style={{ flex: 1 }}><Text style={styles.title} numberOfLines={1}>{abaColegas ? 'Motoristas' : nomeAgencia || 'Sua agência'}</Text><Text style={styles.subtitle}>{conectado ? 'Conversa em tempo real' : 'Reconectando conversa…'}</Text></View>
-            {!abaColegas && <Pressable accessibilityRole="button" accessibilityLabel="Enviar alerta para a agência" onPress={alertarAgencia} style={styles.close}><Ionicons name="notifications-outline" size={24} color="#b45309" /></Pressable>}
+            <View style={{ flex: 1 }}><Text style={styles.title} numberOfLines={1}>{abaColegas ? (comunicacao ? 'Contatos' : 'Motoristas') : nomeAgencia || 'Sua agência'}</Text><Text style={styles.subtitle}>{conectado ? 'Conversa em tempo real' : 'Reconectando conversa…'}</Text></View>
+            {!abaColegas && <Pressable accessibilityRole="button" accessibilityLabel="Enviar alerta para a agência" onPress={alertarAgencia} style={[styles.close, { backgroundColor: '#fee2e2', borderRadius: 14 }]}><IconeAlerta tamanho={20} /></Pressable>}
             {!abaColegas && <Pressable accessibilityRole="button" accessibilityLabel="Bipar para chamar a agência no rádio" onPress={biparAgencia} style={styles.close}><Ionicons name="radio-outline" size={24} color="#047857" /></Pressable>}
             <Pressable accessibilityLabel="Fechar conversa" onPress={fechar} style={styles.close}><Ionicons name="close" size={25} color="#475569" /></Pressable>
           </View>
           <View style={{ flexDirection: 'row', padding: 8, gap: 8 }}>
             <Pressable disabled={gravando || !!audioPendente || enviando} onPress={() => { setAbaColegas(false); abertoRef.current = true; carregar(); }} style={{ flex: 1, padding: 12, backgroundColor: !abaColegas ? '#d1fae5' : '#e2e8f0', borderRadius: 14 }}><Text style={{ textAlign: 'center', color: '#065f46', fontWeight: '700' }}>Agência{naoLidas ? ` (${naoLidas})` : ''}</Text></Pressable>
-            <Pressable disabled={gravando || !!audioPendente || enviando} onPress={() => { setAbaColegas(true); abertoRef.current = false; }} style={{ flex: 1, padding: 12, backgroundColor: abaColegas ? '#d1fae5' : '#e2e8f0', borderRadius: 14 }}><Text style={{ textAlign: 'center', color: '#065f46', fontWeight: '700' }}>Motoristas{naoLidasColegas ? ` (${naoLidasColegas})` : ''}</Text></Pressable>
+            <Pressable disabled={gravando || !!audioPendente || enviando} onPress={() => { setAbaColegas(true); abertoRef.current = false; }} style={{ flex: 1, padding: 12, backgroundColor: abaColegas ? '#d1fae5' : '#e2e8f0', borderRadius: 14 }}><Text style={{ textAlign: 'center', color: '#065f46', fontWeight: '700' }}>{comunicacao ? 'Contatos' : 'Motoristas'}{naoLidasColegas ? ` (${naoLidasColegas})` : ''}</Text></Pressable>
           </View>
           {abaColegas ? aberto && <ChatColegas inicial={colegaEvento || Number(colega) || undefined} /> : <>
           <ScrollView ref={scrollRef} style={styles.history} contentContainerStyle={styles.messages} keyboardShouldPersistTaps="handled"

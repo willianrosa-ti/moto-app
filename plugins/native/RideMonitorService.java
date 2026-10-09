@@ -72,6 +72,8 @@ public class RideMonitorService extends Service {
     private PowerManager.WakeLock wakeLock;
     private volatile String token;
     private volatile boolean radarAtivo = true;
+    private volatile boolean comunicacaoOnline = false;
+    private long ultimoSinalComunicacao = 0;
     private long ultimaConsultaMensagens = 0;
     private String ultimaVersaoCorridas = null;
     private long ultimaConsultaCompletaCorridas = 0;
@@ -83,6 +85,10 @@ public class RideMonitorService extends Service {
 
     public static void setAppInForeground(boolean appEmPrimeiroPlanoAtual) {
         appEmPrimeiroPlano = appEmPrimeiroPlanoAtual;
+    }
+
+    public static boolean isAppInForeground() {
+        return appEmPrimeiroPlano;
     }
 
     @Override
@@ -108,6 +114,7 @@ public class RideMonitorService extends Service {
         iniciarForeground();
         iniciarWakeLock();
         iniciarLoop();
+        RadioNucleo.obter(this).iniciar(apiBase, token);
         if (radarAtivo) iniciarMonitoramentoLocalizacao(); else pararMonitoramentoLocalizacao();
 
         return START_STICKY;
@@ -125,7 +132,8 @@ public class RideMonitorService extends Service {
         if (intent == null) return;
 
         radarAtivo = intent.getBooleanExtra("radarAtivo", true);
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean("radarAtivo", radarAtivo).apply();
+        comunicacaoOnline = intent.getBooleanExtra("comunicacaoOnline", false);
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean("radarAtivo", radarAtivo).putBoolean("comunicacaoOnline", comunicacaoOnline).apply();
         if (intent.hasExtra("refreshToken")) {
             try { DriverSessionSecrets.save(this, intent.getStringExtra("refreshToken")); } catch (Exception ignored) { }
         }
@@ -155,6 +163,7 @@ public class RideMonitorService extends Service {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         token = prefs.getString(PREF_TOKEN, null);
         radarAtivo = prefs.getBoolean("radarAtivo", true);
+        comunicacaoOnline = prefs.getBoolean("comunicacaoOnline", false);
         apiBase = normalizarApiBase(prefs.getString(PREF_API_BASE, API_BASE_PADRAO));
     }
 
@@ -168,11 +177,13 @@ public class RideMonitorService extends Service {
                 tiposForeground |= ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
             }
 
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                tiposForeground
-            );
+            try {
+                startForeground(NOTIFICATION_ID, notification, tiposForeground);
+            } catch (Exception semPermissao) {
+                // Ex.: religado depois de reiniciar o celular, sem poder usar a localização agora: segue só com
+                // mensagens, rádio e alertas.
+                startForeground(NOTIFICATION_ID, notification, Build.VERSION.SDK_INT >= 34 ? ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING : 0);
+            }
         } else {
             startForeground(NOTIFICATION_ID, notification);
         }
@@ -199,6 +210,7 @@ public class RideMonitorService extends Service {
                 consultarMensagens();
                 consultarJornada();
             }
+            if (comunicacaoOnline) manterOnlineComunicacao();
             if (!radarAtivo) return;
             if (!deveConsultarCorridas()) return;
             consultarFila();
@@ -622,6 +634,7 @@ public class RideMonitorService extends Service {
     }
 
     private void pararMonitoramento() {
+        RadioNucleo.obter(this).parar();
         pararMonitoramentoLocalizacao();
         pararLoop();
         liberarWakeLock();
@@ -769,6 +782,7 @@ public class RideMonitorService extends Service {
             if (status == 401 || status == 403) { pararMonitoramento(); return false; }
             if (status != 200) return false;
             token = new JSONObject(lerResposta(connection.getInputStream())).getString("token");
+            RadioNucleo.obter(this).atualizarToken(token);
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(PREF_TOKEN, token).apply();
             return true;
         } finally { connection.disconnect(); }
@@ -787,6 +801,23 @@ public class RideMonitorService extends Service {
     // Com o app em segundo plano, o rádio é consultado a cada ciclo para os alertas tocarem na hora.
     // A versão das corridas vem da memória do servidor (sem banco). As corridas só são buscadas quando ela
     // muda (corrida nova, aceita, cancelada) ou, por garantia, a cada 30 s. Servidor antigo: busca sempre.
+    // Conta só de comunicação (sem localização): a cada minuto avisa que segue online, também com o app fechado.
+    private void manterOnlineComunicacao() {
+        long agora = System.currentTimeMillis();
+        if (agora - ultimoSinalComunicacao < 60000) return;
+        ultimoSinalComunicacao = agora;
+        try {
+            HttpURLConnection connection = (HttpURLConnection) new URL(apiBase + "/api/Motorista/alterar-status-online").openConnection();
+            try {
+                connection.setRequestMethod("POST"); connection.setConnectTimeout(10000); connection.setReadTimeout(10000);
+                connection.setDoOutput(true); connection.setRequestProperty("Content-Type", "application/json");
+                connection.setRequestProperty("Authorization", "Bearer " + token);
+                try (OutputStream out = connection.getOutputStream()) { out.write("true".getBytes(StandardCharsets.UTF_8)); }
+                connection.getResponseCode();
+            } finally { connection.disconnect(); }
+        } catch (Exception ignorado) { }
+    }
+
     private boolean deveConsultarCorridas() {
         long agora = System.currentTimeMillis();
         String versao = null;
