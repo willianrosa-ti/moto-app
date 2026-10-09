@@ -171,3 +171,21 @@ test('voz: redução para 8 kHz guarda a sobra entre quadros', async () => {
   assert.equal(reduzirTaxa(new Float32Array(883), 44100, 8000, { pos: 0, soma: 0, n: 0 }).length, 160);
   assert.equal(reamostrar(new Float32Array(441), 44100, 48000).length, 480);
 });
+test('rádio: aviso de conversa encerrada some sozinho; erro ao chamar continua na tela', async () => {
+  const f = await cliente({ chamadaInicial: chamada() }); f.client.avisoMs = 30;
+  f.client.receive(chamada({ versao: 2, status: 'Encerrada', motivo: 'Conversa encerrada' }));
+  assert.equal(f.client.state.erro, 'Conversa encerrada'); await espera(50); assert.equal(f.client.state.erro, '');
+  f.invoke = async () => { throw new Error('HubException: Piloto está ocupado e não recebe rádio agora.'); };
+  await f.client.call('Motorista', 2); await espera(50);
+  assert.equal(f.client.state.erro, 'Piloto está ocupado e não recebe rádio agora.'); await f.client.dispose();
+});
+test('rádio: alerta avulso vai pelo hub e chega pelo evento', async () => {
+  const recebidos = [];
+  const f = await cliente({ invoke: async (metodo, perfil, id) => metodo === 'AlertaAvulso' ? `Alerta enviado para ${perfil}:${id}.` : undefined });
+  f.client.aoAlertaAvulso = a => recebidos.push(a.de.nome);
+  assert.equal(await f.client.alertarAvulso('Agencia', 1), 'Alerta enviado para Agencia:1.');
+  f.eventos.RadioAlertaAvulso({ id: 'x', de: b, em: new Date().toISOString() });
+  assert.deepEqual(recebidos, ['Piloto']);
+  f.invoke = async () => { throw new Error('HubException: Aguarde um instante para enviar outro alerta.'); };
+  await assert.rejects(f.client.alertarAvulso('Agencia', 1), /Aguarde um instante/); await f.client.dispose();
+});

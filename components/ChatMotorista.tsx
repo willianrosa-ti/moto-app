@@ -3,7 +3,7 @@ import * as signalR from '@microsoft/signalr';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useGlobalSearchParams, usePathname, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, AppState, DeviceEventEmitter, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppOverlay from '../native/AppOverlay';
 import { emitirAvisoRecebido } from '../services/avisos';
@@ -26,7 +26,9 @@ export default function ChatMotorista() {
   const { chat, colega } = useGlobalSearchParams<{ chat?: string; colega?: string }>();
   const [abaColegas, setAbaColegas] = useState(false);
   const [naoLidasColegas, setNaoLidasColegas] = useState(0);
-  const { chamar, estado: radio } = useRadio();
+  const { chamar, alertar, estado: radio } = useRadio();
+  const [aviso, setAviso] = useState('');
+  useEffect(() => { if (!aviso) return; const t = setTimeout(() => setAviso(''), 2500); return () => clearTimeout(t); }, [aviso]);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [aberto, setAberto] = useState(false);
@@ -195,6 +197,16 @@ export default function ChatMotorista() {
     return () => { encerrado = true; cicloRef.current = ciclo + 1; clearInterval(intervalo); clearTimeout(tentativa); estado.remove(); conexao.stop(); setConectado(false); };
   }, [ativo, carregar, ler, carregarColegas]);
 
+  // Abrir a conversa por dentro do app (alerta recebido, cartão de comunicação), sem trocar de tela.
+  const [colegaEvento, setColegaEvento] = useState<number | undefined>();
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('abrirConversa', (d?: { perfil?: string; id?: number }) => {
+      if (d?.perfil === 'Motorista' && d.id) { setColegaEvento(d.id); setAbaColegas(true); setAberto(true); abertoRef.current = false; }
+      else { setAbaColegas(false); setAberto(true); abertoRef.current = true; acompanharRef.current = true; carregar(); }
+    });
+    return () => sub.remove();
+  }, [carregar]);
+
   useEffect(() => {
     if (pathname === '/radar/suporte' || (ativo && chat === '1')) { setAbaColegas(false); setAberto(true); abertoRef.current = true; acompanharRef.current = true; carregar(); }
     if (!ativo) {
@@ -284,8 +296,17 @@ export default function ChatMotorista() {
     try {
       const r = await motoristaFetch('/api/Radio/config'); if (!r.ok) throw new Error('Não foi possível consultar o rádio.');
       const c = await r.json();
-      if (!c.podeChamarAgencia) throw new Error('Você pode chamar a agência no rádio durante uma corrida. O chat está sempre disponível.');
+      if (!c.podeChamarAgencia) throw new Error('Fora de uma corrida, o rádio com a agência é aberto por ela. Toque no sino para enviar um alerta.');
       chamar('Agencia', c.eu.agenciaId);
+    } catch (e) { setErro((e as Error).message); }
+  }
+
+  // Alerta (BIP BIP ALERTA) para a agência, a qualquer momento.
+  async function alertarAgencia() {
+    try {
+      const r = await motoristaFetch('/api/Radio/config'); if (!r.ok) throw new Error('Não foi possível consultar o rádio.');
+      const c = await r.json();
+      setAviso(await alertar('Agencia', c.eu.agenciaId) || 'Alerta enviado.'); setErro('');
     } catch (e) { setErro((e as Error).message); }
   }
 
@@ -305,6 +326,7 @@ export default function ChatMotorista() {
           <View style={styles.header}>
             <View style={styles.avatar}><Ionicons name="headset-outline" size={24} color="#047857" /></View>
             <View style={{ flex: 1 }}><Text style={styles.title} numberOfLines={1}>{abaColegas ? 'Motoristas' : nomeAgencia || 'Sua agência'}</Text><Text style={styles.subtitle}>{conectado ? 'Conversa em tempo real' : 'Reconectando conversa…'}</Text></View>
+            {!abaColegas && <Pressable accessibilityRole="button" accessibilityLabel="Enviar alerta para a agência" onPress={alertarAgencia} style={styles.close}><Ionicons name="notifications-outline" size={24} color="#b45309" /></Pressable>}
             {!abaColegas && <Pressable accessibilityRole="button" accessibilityLabel="Bipar para chamar a agência no rádio" onPress={biparAgencia} style={styles.close}><Ionicons name="radio-outline" size={24} color="#047857" /></Pressable>}
             <Pressable accessibilityLabel="Fechar conversa" onPress={fechar} style={styles.close}><Ionicons name="close" size={25} color="#475569" /></Pressable>
           </View>
@@ -312,7 +334,7 @@ export default function ChatMotorista() {
             <Pressable disabled={gravando || !!audioPendente || enviando} onPress={() => { setAbaColegas(false); abertoRef.current = true; carregar(); }} style={{ flex: 1, padding: 12, backgroundColor: !abaColegas ? '#d1fae5' : '#e2e8f0', borderRadius: 14 }}><Text style={{ textAlign: 'center', color: '#065f46', fontWeight: '700' }}>Agência{naoLidas ? ` (${naoLidas})` : ''}</Text></Pressable>
             <Pressable disabled={gravando || !!audioPendente || enviando} onPress={() => { setAbaColegas(true); abertoRef.current = false; }} style={{ flex: 1, padding: 12, backgroundColor: abaColegas ? '#d1fae5' : '#e2e8f0', borderRadius: 14 }}><Text style={{ textAlign: 'center', color: '#065f46', fontWeight: '700' }}>Motoristas{naoLidasColegas ? ` (${naoLidasColegas})` : ''}</Text></Pressable>
           </View>
-          {abaColegas ? aberto && <ChatColegas inicial={Number(colega) || undefined} /> : <>
+          {abaColegas ? aberto && <ChatColegas inicial={colegaEvento || Number(colega) || undefined} /> : <>
           <ScrollView ref={scrollRef} style={styles.history} contentContainerStyle={styles.messages} keyboardShouldPersistTaps="handled"
             scrollEventThrottle={100} onScroll={({ nativeEvent: e }) => { acompanharRef.current = e.contentSize.height - e.layoutMeasurement.height - e.contentOffset.y < 100; }}
             onContentSizeChange={() => { if (acompanharRef.current) scrollRef.current?.scrollToEnd({ animated: false }); }}
@@ -325,6 +347,7 @@ export default function ChatMotorista() {
             </View>)}
           </ScrollView>
           {!!erro && <Pressable onPress={carregar}><Text accessibilityRole="alert" style={styles.error}>{erro}</Text></Pressable>}
+          {!!aviso && !abaColegas && <Text accessibilityLiveRegion="polite" style={{ color: '#047857', fontSize: 12, paddingHorizontal: 16, paddingVertical: 6, backgroundColor: '#ecfdf5' }}>{aviso}</Text>}
           <View style={styles.composer}>
             {gravando ? (
               <View style={styles.gravacao} accessibilityLiveRegion="polite"><View style={styles.pontoGravando} /><Text style={styles.textoGravando}>Gravando {formatarDuracao(tempoGravacao)}</Text></View>

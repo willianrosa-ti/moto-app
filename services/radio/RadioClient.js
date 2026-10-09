@@ -8,13 +8,15 @@ export class RadioClient {
   // bipe(tipo): toca o bipe do rádio ('falar' ao apertar, 'ouvir' quando o outro começa a falar);
   // ao apertar, devolve quantos ms o microfone espera para o bipe não ir junto com a voz.
   // aoAlertar(chamada): quem é chamado recebeu um alerta (entre motoristas; no terceiro, conecta).
-  constructor({ hub, config, media, update, invite = () => {}, id = uuid, autoAtender = () => false, bipe = () => 0, aoAlertar = () => {} }) {
-    Object.assign(this, { hub, config, media, update, invite, id, autoAtender, bipe, aoAlertar });
+  // aoAlertaAvulso(alerta): alguém mandou um alerta pelo chat, sem abrir o rádio ({ id, de: pessoa, em }).
+  constructor({ hub, config, media, update, invite = () => {}, id = uuid, autoAtender = () => false, bipe = () => 0, aoAlertar = () => {}, aoAlertaAvulso = () => {} }) {
+    Object.assign(this, { hub, config, media, update, invite, id, autoAtender, bipe, aoAlertar, aoAlertaAvulso });
     this.state = { chamada: null, eu: null, conectado: false, preparando: false, erro: '' };
     this.closed = new Set(); this.held = false; this.disposed = false;
-    this.modo = 'parado'; this.micFila = Promise.resolve(); this.geracao = 0; this.seq = 0;
+    this.modo = 'parado'; this.micFila = Promise.resolve(); this.geracao = 0; this.seq = 0; this.avisoMs = 2000;
     hub.on('RadioEstado', e => this.receive(e));
     hub.on('RadioVoz', v => this.ouvir(v));
+    hub.on('RadioAlertaAvulso', a => { if (!this.disposed) this.aoAlertaAvulso(a); });
     hub.onreconnecting(() => this.offline());
     hub.onreconnected(() => { this.emit({ conectado: true }); });
     hub.onclose(() => { this.offline(); if (!this.disposed) this.retry = setTimeout(() => this.start(), 4000); });
@@ -43,6 +45,12 @@ export class RadioClient {
     finally { this.emit({ preparando: false }); }
   }
   // Entre motoristas: quem chamou envia um alerta (até três) para quem não está no app.
+  // Alerta avulso pelo chat (BIP BIP ALERTA), inclusive para a agência. Devolve a mensagem de confirmação.
+  async alertarAvulso(perfil, id) {
+    if (!this.state.conectado) throw new Error('Rádio sem conexão. Aguarde a reconexão.');
+    try { return await this.hub.invoke('AlertaAvulso', perfil, id); }
+    catch (e) { throw new Error(cleanError(e, 'Não foi possível enviar o alerta.')); }
+  }
   async alertar() {
     const c = this.state.chamada;
     if (!c || c.status !== 'Tocando' || c.origem.chave !== this.state.eu?.chave) return;
@@ -79,7 +87,7 @@ export class RadioClient {
     }
     if (e.status === 'Encerrada') {
       this.closed.add(e.id); if (this.closed.size > 50) this.closed.delete(this.closed.values().next().value);
-      if (current?.id === e.id) { this.cleanup(); this.emit({ chamada: null, erro: e.motivo || '' }); }
+      if (current?.id === e.id) { this.cleanup(); this.emit({ chamada: null, erro: e.motivo || '' }); this.avisoBreve(e.motivo); }
       return;
     }
     if (current && current.id !== e.id) return;
@@ -174,16 +182,23 @@ export class RadioClient {
   }
   async end(message = '') {
     const c = this.state.chamada;
-    this.cleanup(); this.emit({ chamada: null, erro: message });
+    this.cleanup(); this.emit({ chamada: null, erro: message }); this.avisoBreve(message);
     if (c) {
       this.closed.add(c.id);
       try { await this.hub.invoke('Acao', c.id, 'Encerrar'); } catch { /* expiração também limpa o servidor */ }
     }
   }
   fail(e) { return this.end(cleanError(e)); }
+  // Aviso de conversa encerrada fica só 2 s na tela.
+  avisoBreve(mensagem) {
+    clearTimeout(this.avisoTimer);
+    if (!mensagem) return;
+    this.avisoTimer = setTimeout(() => { if (this.state.erro === mensagem && !this.state.chamada) this.emit({ erro: '' }); }, this.avisoMs);
+  }
   offline() {
     const c = this.state.chamada; if (c) this.closed.add(c.id);
     this.cleanup(); this.emit({ conectado: false, chamada: null, erro: c ? 'Conexão perdida. Chame novamente quando reconectar.' : this.state.erro });
+    if (c) this.avisoBreve(this.state.erro);
   }
   cleanup() {
     this.held = false; this.micLiberadoEm = 0; this.aberto = false; this.atendendo = null;
@@ -192,7 +207,7 @@ export class RadioClient {
     try { this.media.clear(); } catch { /* mídia já fechada */ }
   }
   async dispose() {
-    this.disposed = true; clearInterval(this.heartbeat); clearTimeout(this.retry);
+    this.disposed = true; clearInterval(this.heartbeat); clearTimeout(this.retry); clearTimeout(this.avisoTimer);
     await this.end(); await this.hub.stop();
   }
 }

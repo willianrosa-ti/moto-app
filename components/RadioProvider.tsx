@@ -4,13 +4,15 @@ import { usePathname } from 'expo-router';
 import * as signalR from '@microsoft/signalr';
 import { Ionicons } from '@expo/vector-icons';
 import { API_BASE, motoristaFetch, obterTokenMotorista } from '../services/motoristaApi';
-import { RadioClient, type EstadoRadio } from '../services/radio/RadioClient';
+import { RadioClient, type AlertaAvulso, type EstadoRadio } from '../services/radio/RadioClient';
 import { radioMedia } from '../services/radio/media';
 import AppOverlay from '../native/AppOverlay';
 import { Audio } from 'expo-av';
 
 const vazio: EstadoRadio = { chamada: null, eu: null, conectado: false, preparando: false, erro: '' };
-const RadioContext = createContext({ chamar: (_perfil: string, _id: number) => {}, estado: vazio });
+const RadioContext = createContext({ chamar: (_perfil: string, _id: number) => {}, estado: vazio,
+  // Alerta avulso pelo chat (BIP BIP ALERTA); devolve a confirmação ou lança o motivo.
+  alertar: async (_perfil: string, _id: number): Promise<string> => '' });
 export const useRadio = () => useContext(RadioContext);
 
 // Duração do PRI RADIO: o microfone só abre depois do bipe, como num rádio comunicador.
@@ -35,6 +37,7 @@ const ALERTAS_PARA_CONECTAR = 3;
 export default function RadioProvider({ children }: { children: React.ReactNode }) {
   const ativo = usePathname().startsWith('/radar');
   const [estado, setEstado] = useState(vazio);
+  const [alertaRecebido, setAlertaRecebido] = useState<AlertaAvulso | null>(null);
   const client = useRef<RadioClient | null>(null);
   useEffect(() => {
     if (!ativo) return;
@@ -49,6 +52,13 @@ export default function RadioProvider({ children }: { children: React.ReactNode 
         tocarAlertaRadio(`${chamada.id}:${chamada.alertas}`);
         Vibration.vibrate([0, 300, 150, 300]);
       },
+      // Alerta pelo chat: toca o BIP BIP ALERTA (também com o app em segundo plano) e mostra quem chamou.
+      aoAlertaAvulso: alerta => {
+        tocarAlertaRadio(`avulso:${alerta.id}`);
+        Vibration.vibrate([0, 300, 150, 300]);
+        if (AppState.currentState !== 'active') AppOverlay.notifyMessage(`radio-avulso-${alerta.id}`, `Alerta · ${alerta.de.nome}`, 'Toque para abrir a conversa.').catch(() => {});
+        setAlertaRecebido(alerta);
+      },
       invite: chamada => {
         Vibration.vibrate([0, 180, 100, 180]);
         if (AppState.currentState !== 'active') AppOverlay.notifyMessage(`radio-${chamada.id}`, `Rádio · ${chamada.origem.nome}`,
@@ -61,7 +71,7 @@ export default function RadioProvider({ children }: { children: React.ReactNode 
     const listener = AppState.addEventListener('change', s => {
       if (s === 'active') c.atenderPendente(); else c.release();
     });
-    return () => { listener.remove(); audioFocus.remove(); client.current = null; c.dispose(); setEstado(vazio); };
+    return () => { listener.remove(); audioFocus.remove(); client.current = null; c.dispose(); setEstado(vazio); setAlertaRecebido(null); };
   }, [ativo]);
   const chamada = estado.chamada;
   const recebendo = chamada?.status === 'Tocando' && chamada.destino.chave === estado.eu?.chave;
@@ -70,8 +80,25 @@ export default function RadioProvider({ children }: { children: React.ReactNode 
   const alertas = chamada?.alertas || 0;
   const podeAlertar = chamada?.status === 'Tocando' && !recebendo && chamada.origem.chave === estado.eu?.chave && chamada.destino.perfil === 'Motorista';
   const texto = chamada?.status === 'Tocando' ? recebendo ? 'Conectando o rádio…' : podeAlertar ? (alertas >= ALERTAS_PARA_CONECTAR ? 'Alerta 3/3 enviado · conectando o rádio…' : 'Chamando… se o colega não estiver no app, envie o alerta') : 'Chamando… conectando o rádio' : chamada?.status === 'Ativa' ? falando ? 'Você está falando' : chamada.falante ? `${outro?.nome} está falando` : 'Canal livre' : 'Conectando áudio…';
-  return <RadioContext.Provider value={{ chamar: (perfil, id) => { client.current?.call(perfil, id); }, estado }}>
+  const abrirConversa = (a: AlertaAvulso) => {
+    setAlertaRecebido(null);
+    // O chat (ChatMotorista) abre na conversa de quem mandou o alerta.
+    DeviceEventEmitter.emit('abrirConversa', { perfil: a.de.perfil, id: a.de.id });
+  };
+  return <RadioContext.Provider value={{ chamar: (perfil, id) => { client.current?.call(perfil, id); }, estado,
+    alertar: async (perfil, id) => { if (!client.current) throw new Error('Rádio indisponível.'); return client.current.alertarAvulso(perfil, id); } }}>
     {children}
+    <Modal transparent visible={ativo && !!alertaRecebido && !chamada} animationType="fade" onRequestClose={() => setAlertaRecebido(null)}>
+      <View style={s.backdrop}><View style={s.card} accessibilityViewIsModal>
+        <View style={[s.icon, { backgroundColor: '#fef3c7' }]}><Ionicons name="notifications" color="#b45309" size={32} /></View>
+        <Text style={s.eyebrow}>ALERTA</Text><Text style={s.name}>{alertaRecebido?.de.nome || 'Alerta'}</Text>
+        <Text style={s.status}>{alertaRecebido?.de.perfil === 'Agencia' ? 'A agência está chamando você.' : 'Seu colega está chamando você.'}</Text>
+        <Pressable accessibilityRole="button" onPress={() => alertaRecebido && abrirConversa(alertaRecebido)} style={s.alerta}>
+          <Ionicons name="chatbubbles" size={24} color="#fff" /><Text style={s.white}>Abrir conversa</Text>
+        </Pressable>
+        <Pressable style={s.end} onPress={() => setAlertaRecebido(null)}><Text style={[s.endText, { color: '#475569' }]}>Fechar</Text></Pressable>
+      </View></View>
+    </Modal>
     <Modal transparent visible={ativo && (!!chamada || !!estado.erro || estado.preparando)} animationType="fade" onRequestClose={() => client.current?.end()}>
       <View style={s.backdrop}><View style={s.card} accessibilityViewIsModal>
         <View style={s.icon}><Ionicons name="radio-outline" color="#065f46" size={32} /></View>

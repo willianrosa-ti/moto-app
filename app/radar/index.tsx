@@ -13,7 +13,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import * as Updates from 'expo-updates';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppStateStatus } from 'react-native';
-import { Alert, Animated, AppState, Easing, Linking, Modal, PermissionsAndroid, Platform, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
+import { Alert, Animated, AppState, DeviceEventEmitter, Easing, Linking, Modal, PermissionsAndroid, Platform, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const ficheiroBuzina = require('../../assets/sounds/buzina.mp3');
@@ -130,6 +130,10 @@ export default function Radar() {
   const [atualizacaoDisponivel, setAtualizacaoDisponivel] = useState(false);
   const [verificandoAtualizacao, setVerificandoAtualizacao] = useState(false);
   
+  // Agência "somente comunicação": sem corridas, só rádio, áudio e texto. Ocupado: ninguém chama no rádio.
+  const [comunicacao, setComunicacao] = useState(false);
+  const comunicacaoRef = useRef(false);
+  const [ocupado, setOcupado] = useState(false);
   const [valorDiario, setValorDiario] = useState<number>(0); 
   const [mostrarValor, setMostrarValor] = useState(false); 
 
@@ -229,7 +233,26 @@ export default function Radar() {
   };
 
   // --- FUNÇÃO PARA GERENCIAR CLIQUES NO MENU COM TRANSIÇÃO ---
-  const executarAcaoMenu = (acao: 'financeiro' | 'notificacoes' | 'suporte') => {
+  const preferenciasCarregadas = useRef(false);
+  const carregarPreferenciasRadio = useCallback(async () => {
+    try {
+      const resposta = await motoristaFetch('/api/Radio/preferencias');
+      if (!resposta.ok) return;
+      const p = await resposta.json();
+      preferenciasCarregadas.current = true;
+      comunicacaoRef.current = !!p.comunicacao; setComunicacao(!!p.comunicacao); setOcupado(!!p.ocupado);
+      AsyncStorage.multiSet([['agenciaComunicacao', String(!!p.comunicacao)], ['radioOcupado', String(!!p.ocupado)]]).catch(() => {});
+    } catch { /* Sem internet: mantém o que está guardado no aparelho. */ }
+  }, []);
+  useEffect(() => {
+    AsyncStorage.multiGet(['agenciaComunicacao', 'radioOcupado']).then(([[, c], [, o]]) => {
+      if (preferenciasCarregadas.current) return;
+      comunicacaoRef.current = c === 'true'; setComunicacao(c === 'true'); setOcupado(o === 'true');
+    }).catch(() => {});
+  }, []);
+  useFocusEffect(useCallback(() => { carregarPreferenciasRadio(); }, [carregarPreferenciasRadio]));
+
+  const executarAcaoMenu = (acao: 'financeiro' | 'notificacoes' | 'suporte' | 'configuracoes') => {
     setMenuAberto(false); // Fecha o menu lateral
     setProcessandoAcesso(true); // Abre a tela de carregamento da MIL-LIN
 
@@ -241,6 +264,8 @@ export default function Radar() {
         navegar.push('/radar/notificacoes' as any);
       } else if (acao === 'suporte') {
         navegar.push('/radar/suporte' as any);
+      } else if (acao === 'configuracoes') {
+        navegar.push('/radar/configuracoes' as any);
       }
     }, 1000);
   };
@@ -410,7 +435,7 @@ export default function Radar() {
     if (nova && Platform.OS !== 'android') tocarBuzina();
   };
   const sincronizarJornada = async () => {
-    if (sincronizandoRef.current || estadoAppRef.current !== 'active') return;
+    if (sincronizandoRef.current || estadoAppRef.current !== 'active' || comunicacaoRef.current) return;
     sincronizandoRef.current = true;
     try {
       await consultarFila();
@@ -540,7 +565,7 @@ export default function Radar() {
         if (token) {
           await solicitarPermissaoNotificacaoAndroid();
           await AppOverlay.setRideMonitorForeground(estadoAppRef.current === 'active');
-          await AppOverlay.startRideMonitor(token, API_BASE, (await obterRefreshToken()) || '', statusOnline);
+          await AppOverlay.startRideMonitor(token, API_BASE, (await obterRefreshToken()) || '', statusOnline && !comunicacao);
         } else {
           await AppOverlay.stopRideMonitor();
         }
@@ -553,14 +578,24 @@ export default function Radar() {
     return () => {
       cancelado = true;
     };
-  }, [statusOnline]);
+  }, [statusOnline, comunicacao]);
 
   // Mantém o motorista realmente "online" no painel da agência.
   // Mesmo que o GPS demore a mandar uma posição nova, este pulso atualiza a última atividade no backend.
   const enviarSinalDeVida = async () => {
     try {
+      // Em segundo plano no Android, quem envia a posição é o monitor nativo (sem envio em dobro).
+      if (Platform.OS === 'android' && estadoAppRef.current !== 'active' && !comunicacaoRef.current) return;
       const token = await AsyncStorage.getItem('tokenMotorista');
       if (!token) return;
+
+      // Conta só de comunicação: avisa que está online, sem enviar a localização.
+      if (comunicacaoRef.current) {
+        await motoristaFetch(`${API_BASE}/api/Motorista/alterar-status-online`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(true)
+        });
+        return;
+      }
 
       try {
         const localizacaoAtual = await Location.getCurrentPositionAsync({
@@ -600,7 +635,8 @@ export default function Radar() {
     if (!statusOnline) return;
 
     enviarSinalDeVida();
-    const intervaloSinalDeVida = setInterval(enviarSinalDeVida, 5000);
+    // A cada 15 s; o painel recebe a posição na hora e o servidor só grava no banco de 30 em 30 s.
+    const intervaloSinalDeVida = setInterval(enviarSinalDeVida, 15000);
 
     return () => clearInterval(intervaloSinalDeVida);
   }, [statusOnline]);
@@ -623,7 +659,8 @@ export default function Radar() {
         async (localizacao) => {
           setLocalizacaoMotorista(localizacao);
           
-          if (statusOnlineRef.current) {
+          const segundoPlanoAndroid = Platform.OS === 'android' && estadoAppRef.current !== 'active';
+          if (statusOnlineRef.current && !comunicacaoRef.current && !segundoPlanoAndroid) {
             try {
               const token = await AsyncStorage.getItem('tokenMotorista');
               await motoristaFetch(`${API_BASE}/api/Motorista/atualizar-localizacao`, {
@@ -758,7 +795,7 @@ export default function Radar() {
       .withAutomaticReconnect()
       .build();
 
-    conexao.onreconnected(() => { verificarCorridaAtiva(); buscarNotificacoesSuporteMotorista(); });
+    conexao.onreconnected(() => { verificarCorridaAtiva(); buscarNotificacoesSuporteMotorista(); setSinalNovaCorrida(gatilho => gatilho + 1); });
     conexao.on('EtapaCorridaAtualizada', () => { verificarCorridaAtiva(); });
     let encerrada = false;
     let tentativa: ReturnType<typeof setTimeout> | undefined;
@@ -843,7 +880,7 @@ export default function Radar() {
     let intervaloVida: ReturnType<typeof setInterval>;
 
     const buscarCorridasReais = async () => {
-      if (!statusOnline) return;
+      if (!statusOnline || comunicacaoRef.current) return;
 
       try {
         const token = await AsyncStorage.getItem('tokenMotorista'); 
@@ -893,8 +930,9 @@ export default function Radar() {
 
     if (statusOnline) {
       buscarCorridasReais(); 
-      // CORREÇÃO DO TEMPO DE BUSCA (de 25000 para 5000 - 5 segundos)
-      intervaloVida = setInterval(buscarCorridasReais, 1500); 
+      // O servidor avisa na hora quando uma corrida surge, é aceita ou cancelada ("AtualizarCorridas");
+      // esta consulta a cada 30 s só cobre um aviso perdido numa queda de internet.
+      intervaloVida = setInterval(buscarCorridasReais, 30000); 
     }
 
     return () => clearInterval(intervaloVida);
@@ -1148,6 +1186,7 @@ export default function Radar() {
                 statusOnline ? styles.bolinhaVerde : styles.bolinhaVermelha
               ]} />
             </TouchableOpacity>
+            {ocupado && <Text accessibilityLabel="Você está ocupado no rádio" style={{ color: '#fff', backgroundColor: '#b45309', fontSize: 10, fontWeight: '800', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginLeft: 6 }}>OCUPADO</Text>}
           </View>
 
           <TouchableOpacity style={styles.botaoMenu} onPress={() => setMenuAberto(true)}>
@@ -1157,7 +1196,7 @@ export default function Radar() {
         </View>
       </View>
 
-      <View style={styles.containerFlutuante}>
+      {!comunicacao && <View style={styles.containerFlutuante}>
         <View style={styles.blocoGanhos}>
             <View style={styles.linhaValorVisibilidade}>
             <Text style={[styles.valorGanhos, { color: temaAgencia.corPrimaria }]}>
@@ -1168,7 +1207,7 @@ export default function Radar() {
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </View>}
 
       {/* --- MENU MODERNO COM CLIQUE FORA E BOTÃO SAIR --- */}
       <Modal 
@@ -1186,9 +1225,14 @@ export default function Radar() {
                 <View style={styles.linhaSeparadoraMenu} />
                 
                 {/* Alterado para chamar a função com a transição MIL-LIN */}
-                <TouchableOpacity style={styles.itemMenu} onPress={() => executarAcaoMenu('financeiro')}>
+                {!comunicacao && <TouchableOpacity style={styles.itemMenu} onPress={() => executarAcaoMenu('financeiro')}>
                   <Ionicons name="cash-outline" size={20} color={temaAgencia.corPrimaria} />
                   <Text style={styles.textoItemMenu}>FINANCEIRO</Text>
+                </TouchableOpacity>}
+
+                <TouchableOpacity style={styles.itemMenu} onPress={() => executarAcaoMenu('configuracoes')}>
+                  <Ionicons name="settings-outline" size={20} color={temaAgencia.corPrimaria} />
+                  <Text style={styles.textoItemMenu}>CONFIGURAÇÕES</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity style={styles.itemMenu} onPress={() => executarAcaoMenu('notificacoes')}>
@@ -1321,6 +1365,21 @@ export default function Radar() {
       <ScrollView contentContainerStyle={styles.conteudoRadar}>
         <WebPwaNotice corPrimaria={temaAgencia.corPrimaria} />
 
+        {comunicacao && (
+          <View style={{ backgroundColor: '#fff', borderRadius: 20, padding: 22, gap: 12, alignItems: 'center', marginTop: 12, elevation: 2 }}>
+            <Ionicons name="radio-outline" size={44} color={temaAgencia.corPrimaria} />
+            <Text style={{ fontSize: 18, fontWeight: '700', color: '#0f172a', textAlign: 'center' }}>Rádio, áudio e mensagens</Text>
+            <Text style={{ fontSize: 14, color: '#64748b', textAlign: 'center' }}>
+              {!statusOnline ? 'Você está offline. Em Configurações você escolhe se recebe rádio ou alerta assim.' : ocupado ? 'Você está ocupado: ninguém chama você no rádio.' : 'Você está disponível no rádio.'}
+            </Text>
+            <TouchableOpacity accessibilityRole="button" onPress={() => DeviceEventEmitter.emit('abrirConversa', {})}
+              style={{ backgroundColor: temaAgencia.corPrimaria, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 22, flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+              <Ionicons name="chatbubbles-outline" size={20} color="#fff" />
+              <Text style={{ color: '#fff', fontWeight: '700' }}>Abrir conversas</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {!statusOnline && (
           <View style={styles.areaBotaoStatus}>
             <Text style={styles.statusTexto}>Você está offline</Text>
@@ -1388,7 +1447,7 @@ export default function Radar() {
               </View>
             )}
 
-            {statusOnline && !corridaRecebida && !avisoCorridaDirecionada.ativo && (
+            {statusOnline && !comunicacao && !corridaRecebida && !avisoCorridaDirecionada.ativo && (
               <View style={[styles.radarBuscando, { minHeight: alturaTela * 0.55 }]}>
                 <View key={cicloAnimacao} style={[styles.radarArea, { width: tamanhoRadar, height: tamanhoRadar }]}>
                   <View style={[styles.radarAnel, { width: tamanhoRadar, height: tamanhoRadar, borderRadius: tamanhoRadar / 2 }]} />

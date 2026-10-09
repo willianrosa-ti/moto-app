@@ -9,7 +9,15 @@ import { uuid } from '../services/radio/RadioClient';
 import { useRadio } from './RadioProvider';
 import PlayerAudio from './PlayerAudio';
 
-type Colega = { id: number; nome: string; online: boolean; naoLidas: number };
+// radio: "radio" (pode bipar), "alerta" (só alerta), "ocupado" ou "nenhum".
+type Colega = { id: number; nome: string; online: boolean; naoLidas: number; radio?: string };
+const disponibilidade = (c?: Colega) => c?.radio || (c?.online ? 'radio' : 'nenhum');
+function situacao(c: Colega) {
+  const r = disponibilidade(c);
+  if (r === 'ocupado') return 'Ocupado · pode deixar mensagem';
+  if (c.online) return 'Online';
+  return r === 'radio' ? 'Offline · recebe rádio' : r === 'alerta' ? 'Offline · recebe alerta' : 'Offline · pode deixar mensagem';
+}
 type AudioPendente = Gravacao & { clienteId: string; audioId?: string };
 async function api(path: string, body?: object) {
   const r = await motoristaFetch(`/api/ChatDireto${path}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined);
@@ -22,12 +30,14 @@ export default function ChatColegas({ inicial }: { inicial?: number }) {
   const [mensagens, setMensagens] = useState<MensagemDireta[]>([]);
   const [eu, setEu] = useState(0);
   const [texto, setTexto] = useState(''); const [busca, setBusca] = useState('');
-  const [erro, setErro] = useState(''); const [enviando, setEnviando] = useState(false);
+  const [erro, setErro] = useState(''); const [enviando, setEnviando] = useState(false); const [aviso, setAviso] = useState('');
   const [anteriores, setAnteriores] = useState(false); const [gravando, setGravando] = useState(false);
   const [tempo, setTempo] = useState(0); const [audio, setAudio] = useState<AudioPendente | null>(null);
   const gravador = useRef<GravacaoAtiva | null>(null), pendente = useRef<{ texto: string; id: string } | null>(null);
   const trava = useRef(false), ciclo = useRef(0), scroll = useRef<ScrollView>(null);
-  const { chamar } = useRadio();
+  const { chamar, alertar } = useRadio();
+  useEffect(() => { if (!aviso) return; const t = setTimeout(() => setAviso(''), 2500); return () => clearTimeout(t); }, [aviso]);
+  const enviarAlerta = (id: number) => alertar('Motorista', id).then(m => { setErro(''); setAviso(m || 'Alerta enviado.'); }).catch(e => setErro((e as Error).message));
   useEffect(() => { AsyncStorage.getItem('idMotorista').then(id => setEu(Number(id))); }, []);
   useEffect(() => { if (inicial) setSelecionado(inicial); }, [inicial]);
   const contatos = useCallback(() => api('/colegas').then(setColegas).catch(e => setErro(e.message)), []);
@@ -107,14 +117,17 @@ export default function ChatColegas({ inicial }: { inicial?: number }) {
   if (!selecionado) return <View style={s.root}>
     <TextInput style={s.search} accessibilityLabel="Buscar colega" placeholder="Buscar motorista…" value={busca} onChangeText={setBusca} />
     <ScrollView>{colegas.filter(c => c.nome.toLowerCase().includes(busca.toLowerCase())).map(c => <Pressable key={c.id} style={s.contact} onPress={() => setSelecionado(c.id)}>
-      <View style={s.avatar}><Ionicons name="person-outline" size={22} color="#047857" /></View><View style={{ flex: 1 }}><Text style={s.name}>{c.nome}</Text><Text style={s.small}>{c.online ? 'Online' : 'Offline · pode deixar mensagem'}</Text></View>{c.naoLidas > 0 && <Text style={s.unread}>{c.naoLidas}</Text>}
+      <View style={s.avatar}><Ionicons name="person-outline" size={22} color="#047857" /></View><View style={{ flex: 1 }}><Text style={s.name}>{c.nome}</Text><Text style={s.small}>{situacao(c)}</Text></View>{c.naoLidas > 0 && <Text style={s.unread}>{c.naoLidas}</Text>}
     </Pressable>)}{!colegas.length && <Text style={s.empty}>Os motoristas da sua agência aparecerão aqui.</Text>}</ScrollView>
     {!!erro && <Text style={s.error}>{erro}</Text>}
   </View>;
   return <View style={s.root}>
     <View style={s.header}><Pressable accessibilityLabel="Voltar aos motoristas" disabled={enviando} onPress={() => setSelecionado(null)}><Ionicons name="arrow-back" size={24} color="#334155" /></Pressable><Text style={[s.name, { flex: 1 }]}>{colega?.nome || 'Motorista'}</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="Bipar para chamar no rádio" disabled={enviando || !colega?.online} onPress={() => chamar('Motorista', selecionado)} style={[s.beep, !colega?.online && { opacity: 0.4 }]}><Ionicons name="radio-outline" size={20} color="#047857" /><Text style={s.beepText}>Bipar</Text></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Enviar alerta" disabled={enviando || !['radio', 'alerta'].includes(disponibilidade(colega))} onPress={() => enviarAlerta(selecionado)} style={[s.alertBtn, !['radio', 'alerta'].includes(disponibilidade(colega)) && { opacity: 0.4 }]}><Ionicons name="notifications-outline" size={20} color="#b45309" /></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Bipar para chamar no rádio" disabled={enviando || disponibilidade(colega) !== 'radio'} onPress={() => chamar('Motorista', selecionado)} style={[s.beep, disponibilidade(colega) !== 'radio' && { opacity: 0.4 }]}><Ionicons name="radio-outline" size={20} color="#047857" /><Text style={s.beepText}>Bipar</Text></Pressable>
     </View>
+    {colega && <Text style={s.situacao}>{situacao(colega)}</Text>}
+    {!!aviso && <Text accessibilityLiveRegion="polite" style={s.aviso}>{aviso}</Text>}
     <ScrollView ref={scroll} contentContainerStyle={s.messages} keyboardShouldPersistTaps="handled">
       {anteriores && <Pressable onPress={async () => { try { const d = await api(`/${selecionado}/mensagens?antesId=${mensagens[0]?.id}`); adicionar(d.mensagens); setAnteriores(d.temAnteriores); } catch (e) { setErro((e as Error).message); } }}><Text style={s.older}>Carregar anteriores</Text></Pressable>}
       {!mensagens.length && <Text style={s.empty}>Envie uma mensagem ou um áudio para iniciar a conversa.</Text>}
@@ -130,4 +143,4 @@ export default function ChatColegas({ inicial }: { inicial?: number }) {
     </View>
   </View>;
 }
-const s = StyleSheet.create({ root: { flex: 1 }, search: { margin: 12, padding: 14, backgroundColor: '#e2e8f0', borderRadius: 16, color: '#0f172a' }, contact: { flexDirection: 'row', padding: 16, gap: 12, alignItems: 'center' }, avatar: { backgroundColor: '#d1fae5', padding: 12, borderRadius: 18 }, name: { fontSize: 15, fontWeight: '700', color: '#0f172a' }, small: { fontSize: 12, color: '#64748b', marginTop: 3 }, unread: { backgroundColor: '#047857', color: '#fff', padding: 6, borderRadius: 10 }, header: { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 12, backgroundColor: '#fff' }, beep: { flexDirection: 'row', padding: 10, gap: 5, backgroundColor: '#d1fae5', borderRadius: 14 }, beepText: { color: '#047857', fontWeight: '700' }, messages: { padding: 16, gap: 10 }, bubble: { padding: 12, borderRadius: 18, maxWidth: '90%' }, sent: { alignSelf: 'flex-end', backgroundColor: '#d1fae5' }, received: { alignSelf: 'flex-start', backgroundColor: '#fff' }, text: { color: '#0f172a', fontSize: 15 }, time: { color: '#64748b', fontSize: 10, textAlign: 'right', marginTop: 6 }, empty: { color: '#64748b', padding: 30, textAlign: 'center' }, error: { color: '#b91c1c', padding: 12, fontSize: 12 }, older: { color: '#047857', textAlign: 'center', padding: 10 }, composer: { padding: 12, flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff' }, input: { flex: 1, backgroundColor: '#f1f5f9', maxHeight: 100, padding: 12, borderRadius: 18, color: '#0f172a' }, send: { backgroundColor: '#047857', borderRadius: 24, padding: 12 } });
+const s = StyleSheet.create({ root: { flex: 1 }, search: { margin: 12, padding: 14, backgroundColor: '#e2e8f0', borderRadius: 16, color: '#0f172a' }, contact: { flexDirection: 'row', padding: 16, gap: 12, alignItems: 'center' }, avatar: { backgroundColor: '#d1fae5', padding: 12, borderRadius: 18 }, name: { fontSize: 15, fontWeight: '700', color: '#0f172a' }, small: { fontSize: 12, color: '#64748b', marginTop: 3 }, unread: { backgroundColor: '#047857', color: '#fff', padding: 6, borderRadius: 10 }, header: { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 12, backgroundColor: '#fff' }, beep: { flexDirection: 'row', padding: 10, gap: 5, backgroundColor: '#d1fae5', borderRadius: 14 }, beepText: { color: '#047857', fontWeight: '700' }, alertBtn: { padding: 10, backgroundColor: '#fef3c7', borderRadius: 14 }, situacao: { fontSize: 12, color: '#64748b', paddingHorizontal: 16, paddingBottom: 6, backgroundColor: '#fff' }, aviso: { color: '#047857', fontSize: 12, paddingHorizontal: 16, paddingVertical: 6, backgroundColor: '#ecfdf5' }, messages: { padding: 16, gap: 10 }, bubble: { padding: 12, borderRadius: 18, maxWidth: '90%' }, sent: { alignSelf: 'flex-end', backgroundColor: '#d1fae5' }, received: { alignSelf: 'flex-start', backgroundColor: '#fff' }, text: { color: '#0f172a', fontSize: 15 }, time: { color: '#64748b', fontSize: 10, textAlign: 'right', marginTop: 6 }, empty: { color: '#64748b', padding: 30, textAlign: 'center' }, error: { color: '#b91c1c', padding: 12, fontSize: 12 }, older: { color: '#047857', textAlign: 'center', padding: 10 }, composer: { padding: 12, flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff' }, input: { flex: 1, backgroundColor: '#f1f5f9', maxHeight: 100, padding: 12, borderRadius: 18, color: '#0f172a' }, send: { backgroundColor: '#047857', borderRadius: 24, padding: 12 } });

@@ -73,6 +73,8 @@ public class RideMonitorService extends Service {
     private volatile String token;
     private volatile boolean radarAtivo = true;
     private long ultimaConsultaMensagens = 0;
+    private String ultimaVersaoCorridas = null;
+    private long ultimaConsultaCompletaCorridas = 0;
     private final Set<String> filaConhecida = new HashSet<>();
     private volatile String apiBase = API_BASE_PADRAO;
     private volatile Location ultimaLocalizacao;
@@ -198,6 +200,7 @@ public class RideMonitorService extends Service {
                 consultarJornada();
             }
             if (!radarAtivo) return;
+            if (!deveConsultarCorridas()) return;
             consultarFila();
         } catch (Exception ignored) { }
         if (!radarAtivo) return;
@@ -782,11 +785,40 @@ public class RideMonitorService extends Service {
     }
 
     // Com o app em segundo plano, o rádio é consultado a cada ciclo para os alertas tocarem na hora.
+    // A versão das corridas vem da memória do servidor (sem banco). As corridas só são buscadas quando ela
+    // muda (corrida nova, aceita, cancelada) ou, por garantia, a cada 30 s. Servidor antigo: busca sempre.
+    private boolean deveConsultarCorridas() {
+        long agora = System.currentTimeMillis();
+        String versao = null;
+        try {
+            String json = consultarJson("/api/Corrida/versao");
+            if (json != null) versao = new JSONObject(json).optString("versao", null);
+        } catch (Exception ignorado) { }
+        boolean consultar = versao == null || !versao.equals(ultimaVersaoCorridas) || agora - ultimaConsultaCompletaCorridas > 30000;
+        if (consultar) {
+            ultimaVersaoCorridas = versao;
+            ultimaConsultaCompletaCorridas = agora;
+        }
+        return consultar;
+    }
+
     private void consultarRadio() {
         try {
             String radioJson = consultarJson("/api/Radio/atual");
             if (radioJson == null) return;
             JSONObject radio = new JSONObject(radioJson);
+            // Alertas mandados pelo chat (inclusive pela agência): mesma chave do app, cada um toca uma vez.
+            JSONArray avulsos = radio.optJSONArray("alertasAvulsos");
+            if (avulsos != null) {
+                for (int i = 0; i < avulsos.length(); i++) {
+                    JSONObject alerta = avulsos.optJSONObject(i);
+                    if (alerta == null) continue;
+                    String alertaId = alerta.optString("id");
+                    if (RadioAlertas.tocar(this, "avulso:" + alertaId)) {
+                        DriverNotifications.show(this, "radio-avulso-" + alertaId, "Alerta · " + alerta.optString("nome", "Agência"), "Toque para abrir a conversa.");
+                    }
+                }
+            }
             JSONObject chamada = radio.optJSONObject("chamada");
             if (chamada == null || !radio.optBoolean("recebendo")) return;
             JSONObject origem = chamada.optJSONObject("origem");
