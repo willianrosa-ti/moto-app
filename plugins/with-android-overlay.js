@@ -18,6 +18,7 @@ const PERMISSOES_ANDROID = [
   'android.permission.RECORD_AUDIO',
   'android.permission.MODIFY_AUDIO_SETTINGS',
   'android.permission.RECEIVE_BOOT_COMPLETED',
+  'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
 ];
 
 function adicionarPermissoes(manifest) {
@@ -97,6 +98,14 @@ function limparMainActivity(caminhoMainActivity) {
     conteudo = conteudo
       .replace(/(super\.onCreate\(null\)\n)/, '$1    // Tela sempre ligada com o app aberto (o motorista ainda pode apagar no botão de energia).\n    window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)\n')
       .replace(/(super\.onCreate\(null\);\n)/, '$1    getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);\n');
+  }
+
+  if (!conteudo.includes('setAppInForeground')) {
+    const kotlin = caminhoMainActivity.endsWith('.kt');
+    const bloco = kotlin
+      ? '\n  // O monitor nativo sabe na hora se o app está na tela (fora dela ele manda o sinal de vida e as posições).\n  override fun onResume() {\n    super.onResume()\n    com.millin.motorista.overlay.RideMonitorService.setAppInForeground(true)\n  }\n\n  override fun onPause() {\n    com.millin.motorista.overlay.RideMonitorService.setAppInForeground(false)\n    super.onPause()\n  }\n'
+      : '\n  // O monitor nativo sabe na hora se o app está na tela (fora dela ele manda o sinal de vida e as posições).\n  @Override\n  protected void onResume() {\n    super.onResume();\n    com.millin.motorista.overlay.RideMonitorService.setAppInForeground(true);\n  }\n\n  @Override\n  protected void onPause() {\n    com.millin.motorista.overlay.RideMonitorService.setAppInForeground(false);\n    super.onPause();\n  }\n';
+    conteudo = conteudo.replace(/\n\}\s*$/, `\n${bloco}}\n`);
   }
 
   conteudo = conteudo
@@ -190,8 +199,8 @@ function copiarBuzina(projectRoot) {
 }
 
 function copiarBipeRadio(projectRoot) {
-  // PRI RADIO (apertar para falar) e BIP BIP ALERTA (alerta entre motoristas).
-  for (const [arquivo, recurso] of [['pri-radio.mp3', 'pri_radio.mp3'], ['bip-alerta.mp3', 'bip_alerta.mp3']]) {
+  // PRI RADIO (apertar para falar; em WAV para o volume ser aplicado no próprio som) e BIP BIP ALERTA.
+  for (const [arquivo, recurso] of [['pri-radio.wav', 'pri_radio_pcm.wav'], ['bip-alerta.mp3', 'bip_alerta.mp3']]) {
     const origem = path.join(projectRoot, 'assets', 'sounds', arquivo);
     const destino = path.join(projectRoot, 'android', 'app', 'src', 'main', 'res', 'raw', recurso);
     if (!fs.existsSync(origem)) continue;
@@ -252,6 +261,7 @@ import android.media.AudioFocusRequest;
 import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Build;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -400,32 +410,41 @@ public class AppOverlayModule extends ReactContextBaseJavaModule {
     // alto-falante) e não pede foco de áudio: pedir o foco interromperia o próprio rádio.
     @ReactMethod
     public void tocarBipeRadio(Promise promise) {
-        MediaPlayer mediaPlayer = new MediaPlayer();
-        AssetFileDescriptor arquivo = null;
+        // Volume escolhido nas Configurações, aplicado no próprio som (mudo = não toca e o microfone não espera).
         try {
-            mediaPlayer.setAudioAttributes(new AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build());
-            arquivo = reactContext.getResources().openRawResourceFd(R.raw.pri_radio);
-            if (arquivo == null) throw new IllegalStateException("Bipe do rádio não encontrado.");
-            mediaPlayer.setDataSource(arquivo.getFileDescriptor(), arquivo.getStartOffset(), arquivo.getLength());
-            mediaPlayer.setLooping(false);
-            buzinasAtivas.add(mediaPlayer);
-            mediaPlayer.setOnCompletionListener(AppOverlayModule::liberarBuzina);
-            mediaPlayer.setOnErrorListener((player, what, extra) -> { liberarBuzina(player); return true; });
-            mediaPlayer.prepare();
-            // Volume escolhido nas Configurações (mudo = não toca e o microfone não espera).
-            float volume = RadioAlertas.volumeBipe(reactContext);
-            if (volume <= 0f) { liberarBuzina(mediaPlayer); promise.resolve(0); return; }
-            mediaPlayer.setVolume(volume, volume);
-            mediaPlayer.start();
-            promise.resolve(mediaPlayer.getDuration());
+            promise.resolve(RadioAlertas.bipe(reactContext));
         } catch (Exception erro) {
-            liberarBuzina(mediaPlayer);
             promise.reject("E_RADIO_BIPE", "Nao foi possivel tocar o bipe do radio.", erro);
-        } finally {
-            if (arquivo != null) try { arquivo.close(); } catch (Exception ignorado) { }
+        }
+    }
+
+    // Economia de bateria: sem a liberação, alguns aparelhos fecham o app com a tela bloqueada ou depois de fechado.
+    @ReactMethod
+    public void semRestricaoBateria(Promise promise) {
+        try {
+            PowerManager energia = (PowerManager) reactContext.getSystemService(Context.POWER_SERVICE);
+            promise.resolve(Build.VERSION.SDK_INT < Build.VERSION_CODES.M || energia == null || energia.isIgnoringBatteryOptimizations(reactContext.getPackageName()));
+        } catch (Exception erro) {
+            promise.resolve(true);
+        }
+    }
+
+    @ReactMethod
+    public void pedirSemRestricaoBateria(Promise promise) {
+        try {
+            Intent pedido = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + reactContext.getPackageName()));
+            pedido.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            reactContext.startActivity(pedido);
+            promise.resolve(true);
+        } catch (Exception erro) {
+            try {
+                Intent lista = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+                lista.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                reactContext.startActivity(lista);
+                promise.resolve(true);
+            } catch (Exception semTela) {
+                promise.resolve(false);
+            }
         }
     }
 

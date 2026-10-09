@@ -10,6 +10,7 @@ import { uuid } from '../services/radio/RadioClient';
 import { useRadio } from './RadioProvider';
 import PlayerAudio from './PlayerAudio';
 import IconeAlerta from './IconeAlerta';
+import IconeRadio from './IconeRadio';
 import { useAgenciaComunicacao } from '../services/agenciaComunicacao';
 
 // podeRadio/podeAlerta: o que o colega recebe agora (online, ocupado ou offline, conforme as Configurações dele).
@@ -219,7 +220,7 @@ export default function ChatColegas({ inicial, embutido = false }: { inicial?: n
   return <View style={[s.root, embutido && s.embutido]}>
     <View style={s.header}><Pressable accessibilityLabel={comunicacao ? 'Voltar aos contatos' : 'Voltar aos motoristas'} disabled={enviando} onPress={() => setSelecionado(null)}><Ionicons name="arrow-back" size={24} color="#334155" /></Pressable><Text style={[s.name, { flex: 1 }]}>{colega?.nome || 'Motorista'}</Text>
       <Pressable accessibilityRole="button" accessibilityLabel="Enviar alerta" disabled={enviando || !podeAlertar(colega)} onPress={() => enviarAlerta(selecionado)} style={[s.alertBtn, !podeAlertar(colega) && { opacity: 0.4 }]}><IconeAlerta tamanho={20} /></Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel="Chamar no rádio" disabled={enviando || !podeBipar(colega)} onPress={() => chamar('Motorista', selecionado)} style={[s.beep, !podeBipar(colega) && { opacity: 0.4 }]}><Ionicons name="radio-outline" size={22} color="#047857" /></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Chamar no rádio" disabled={enviando || !podeBipar(colega)} onPress={() => chamar('Motorista', selecionado)} style={[s.beep, !podeBipar(colega) && { opacity: 0.4 }]}><IconeRadio tamanho={22} cor="#047857" /></Pressable>
     </View>
     {colega && <Text style={s.situacao}>{situacao(colega)}</Text>}
     {!!aviso && <Text accessibilityLiveRegion="polite" style={s.aviso}>{aviso}</Text>}

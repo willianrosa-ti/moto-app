@@ -210,9 +210,7 @@ public class RideMonitorService extends Service {
             consultarCiclo();
         } catch (Exception ignored) {
         } finally {
-            // Sinal de vida a cada 10 s (reenvia a última posição), também parado, com a tela bloqueada e quando
-            // não há corrida nova para buscar. Junto com o rádio nativo, mantém online quem ligou o app.
-            try { reenviarUltimaLocalizacaoSeNecessario(); } catch (Exception ignored) { }
+            try { manterSinalDeVida(); } catch (Exception ignored) { }
         }
     }
 
@@ -387,8 +385,8 @@ public class RideMonitorService extends Service {
             public void onLocationChanged(Location location) {
                 if (location == null) return;
 
-                ultimaLocalizacao = location;
-                agendarEnvioLocalizacao(location, false);
+                ultimaLocalizacao = posicaoMaisUtil(ultimaLocalizacao, location);
+                agendarEnvioLocalizacao(ultimaLocalizacao, false);
             }
 
             @Override
@@ -496,21 +494,54 @@ public class RideMonitorService extends Service {
         executor.execute(() -> enviarLocalizacaoComSeguranca(location, forcar));
     }
 
-    private void reenviarUltimaLocalizacaoSeNecessario() {
-        Location localizacao = ultimaLocalizacao;
-
-        if (localizacao == null) {
-            localizacao = obterMelhorUltimaLocalizacao();
-            if (localizacao != null) {
-                ultimaLocalizacao = localizacao;
-            }
-        }
-
-        enviarLocalizacaoComSeguranca(localizacao, false);
+    // Posição nova vence, a não ser que seja bem menos precisa que uma de menos de 20 s (ex.: antena logo depois do GPS).
+    private Location posicaoMaisUtil(Location atual, Location nova) {
+        if (atual == null) return nova;
+        boolean recente = nova.getTime() - atual.getTime() < 20000;
+        boolean menosPrecisa = nova.hasAccuracy() && atual.hasAccuracy() && nova.getAccuracy() > atual.getAccuracy() * 2 + 10;
+        return recente && menosPrecisa ? atual : nova;
     }
 
+    // Sinal de vida a cada 10 s enquanto o motorista estiver online, com o app na tela, em segundo plano, com a tela
+    // bloqueada ou fechado: reenvia a última posição ou, sem GPS, só o sinal. É o que o mantém online no painel.
+    private void manterSinalDeVida() {
+        if (!radarAtivo) return;
+        if (System.currentTimeMillis() - ultimoEnvioLocalizacaoMs < INTERVALO_REENVIO_LOCALIZACAO_MS) return;
+        Location localizacao = ultimaLocalizacao;
+        if (localizacao == null) {
+            localizacao = obterMelhorUltimaLocalizacao();
+            if (localizacao != null) ultimaLocalizacao = localizacao;
+        }
+        if (localizacao != null) { enviarPosicao(localizacao, false); return; }
+        ultimoEnvioLocalizacaoMs = System.currentTimeMillis();
+        postar("/api/Motorista/sinal", "{}");
+    }
+
+    private void postar(String endpoint, String corpo) {
+        String tokenAtual = token;
+        if (tokenAtual == null || tokenAtual.trim().isEmpty()) return;
+        HttpURLConnection conexao = null;
+        try {
+            conexao = (HttpURLConnection) new URL(normalizarApiBase(apiBase) + endpoint).openConnection();
+            conexao.setRequestMethod("POST"); conexao.setConnectTimeout(10000); conexao.setReadTimeout(10000);
+            conexao.setDoOutput(true); conexao.setRequestProperty("Content-Type", "application/json");
+            conexao.setRequestProperty("Authorization", "Bearer " + tokenAtual);
+            try (OutputStream saida = conexao.getOutputStream()) { saida.write(corpo.getBytes(StandardCharsets.UTF_8)); }
+            conexao.getResponseCode();
+        } catch (Exception ignorado) {
+        } finally {
+            if (conexao != null) conexao.disconnect();
+        }
+    }
+
+    // Cada posição nova do GPS. Com o app na tela, quem manda as posições é o próprio app (o serviço manda só o sinal de vida).
     private void enviarLocalizacaoComSeguranca(Location location, boolean forcar) {
-        if (location == null || appEmPrimeiroPlano || !radarAtivo) return;
+        if (appEmPrimeiroPlano) return;
+        enviarPosicao(location, forcar);
+    }
+
+    private void enviarPosicao(Location location, boolean forcar) {
+        if (location == null || !radarAtivo) return;
 
         String tokenAtual = token;
         if (tokenAtual == null || tokenAtual.trim().isEmpty()) return;

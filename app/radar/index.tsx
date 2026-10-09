@@ -115,6 +115,8 @@ export default function Radar() {
   useKeepAwake();
 
   const [statusOnline, setStatusOnline] = useState(false);
+  // Falso até saber se o motorista estava ligado (o app pode ter sido fechado ou recriado pelo Android).
+  const [statusCarregado, setStatusCarregado] = useState(false);
   const [corridaRecebida, setCorridaRecebida] = useState<any>(null);
   const [corridaAceita, setCorridaAceita] = useState(false);
   const [sinalNovaCorrida, setSinalNovaCorrida] = useState(0);
@@ -150,6 +152,7 @@ export default function Radar() {
   const corridaRecebidaRef = useRef<any>(null);
   const statusOnlineRef = useRef(false);
   const estadoAppRef = useRef<AppStateStatus>(AppState.currentState);
+  const ultimaPosicaoRef = useRef<Location.LocationObject | null>(null);
 
   const animacaoRadar = useRef(new Animated.Value(0)).current;
   const [cicloAnimacao, setCicloAnimacao] = useState(0);
@@ -542,10 +545,32 @@ export default function Radar() {
   }, []);
   // --- FIM DA INTEGRAÇÃO ---
 
+  // Ao abrir (inclusive depois de fechado, com a tela bloqueada ou recriado pelo Android), o app volta como o
+  // motorista deixou: ligado continua ligado. Quem manda é o servidor (o que a agência vê); sem internet, o aparelho.
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      let ligado: boolean | null = null;
+      try {
+        const resposta = await Promise.race([
+          motoristaFetch('/api/Motorista/jornada'),
+          new Promise<null>(resolver => setTimeout(() => resolver(null), 8000)),
+        ]);
+        if (resposta?.ok) { const jornada = await resposta.json(); if (typeof jornada.online === 'boolean') ligado = jornada.online; }
+      } catch { /* sem internet: usa o que ficou no aparelho */ }
+      if (ligado === null) ligado = (await AsyncStorage.getItem('radarAtivoMotorista').catch(() => null)) === 'true';
+      if (cancelado) return;
+      if (ligado) { statusOnlineRef.current = true; setStatusOnline(true); }
+      setStatusCarregado(true);
+    })();
+    return () => { cancelado = true; };
+  }, []);
+
   useEffect(() => {
     statusOnlineRef.current = statusOnline;
-    AsyncStorage.setItem('radarAtivoMotorista', String(statusOnline));
-  }, [statusOnline]);
+    // Só depois de saber o estado: senão a abertura do app gravaria "desligado" por cima.
+    if (statusCarregado) AsyncStorage.setItem('radarAtivoMotorista', String(statusOnline));
+  }, [statusOnline, statusCarregado]);
 
   useEffect(() => {
     const inscricao = AppState.addEventListener('change', (estado) => {
@@ -572,7 +597,7 @@ export default function Radar() {
   }, []);
 
   useEffect(() => {
-    if (Platform.OS !== 'android') return;
+    if (Platform.OS !== 'android' || !statusCarregado) return;
 
     let cancelado = false;
 
@@ -599,7 +624,20 @@ export default function Radar() {
     return () => {
       cancelado = true;
     };
-  }, [statusOnline, comunicacao]);
+  }, [statusOnline, comunicacao, statusCarregado]);
+
+  // Posição para o sinal de vida: a do GPS em andamento (até 30 s); senão pede uma nova com limite de 8 s
+  // (o sinal não pode ficar travado esperando o GPS); por último, a última conhecida.
+  const posicaoParaSinal = async () => {
+    const ultima = ultimaPosicaoRef.current;
+    if (ultima && Date.now() - ultima.timestamp < 30000) return ultima;
+    const nova = await Promise.race([
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+      new Promise<null>(resolver => setTimeout(() => resolver(null), 8000)),
+    ]).catch(() => null);
+    if (nova) { ultimaPosicaoRef.current = nova; return nova; }
+    return ultima || await Location.getLastKnownPositionAsync().catch(() => null);
+  };
 
   // Mantém o motorista realmente "online" no painel da agência.
   // Mesmo que o GPS demore a mandar uma posição nova, este pulso atualiza a última atividade no backend.
@@ -618,35 +656,21 @@ export default function Radar() {
         return;
       }
 
-      try {
-        const localizacaoAtual = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
-
+      const localizacaoAtual = await posicaoParaSinal();
+      if (localizacaoAtual) {
         setLocalizacaoMotorista(localizacaoAtual);
-
-        await motoristaFetch(`${API_BASE}/api/Motorista/atualizar-localizacao`, {
+        const resposta = await motoristaFetch(`${API_BASE}/api/Motorista/atualizar-localizacao`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             latitude: localizacaoAtual.coords.latitude,
             longitude: localizacaoAtual.coords.longitude
           })
-        });
-      } catch (erroLocalizacao) {
-        // Fallback: mantém o sinal de vida pelo status online, mesmo se o GPS falhar por alguns segundos.
-        await motoristaFetch(`${API_BASE}/api/Motorista/alterar-status-online`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(true)
-        });
+        }).catch(() => null);
+        if (resposta?.ok) return;
       }
+      // Sem posição (GPS desligado ou sem sinal): só o sinal de vida. Não muda o status de ninguém.
+      await motoristaFetch(`${API_BASE}/api/Motorista/sinal`, { method: 'POST' });
     } catch (erro) {
       console.log('Erro ao enviar sinal de vida:', erro);
     }
@@ -678,6 +702,7 @@ export default function Radar() {
           distanceInterval: 10,
         },
         async (localizacao) => {
+          ultimaPosicaoRef.current = localizacao;
           setLocalizacaoMotorista(localizacao);
           
           const segundoPlanoAndroid = Platform.OS === 'android' && estadoAppRef.current !== 'active';
@@ -972,6 +997,25 @@ export default function Radar() {
     return () => clearInterval(timer);
   }, [corridaRecebida, corridaAceita, tempoRestante]);
 
+  // Sem essa liberação, alguns celulares fecham o app com a tela bloqueada ou depois de fechado, e o motorista cai.
+  const garantirSemRestricaoBateria = async () => {
+    if (Platform.OS !== 'android') return;
+    try {
+      if (await AppOverlay.semRestricaoBateria()) return;
+      const ultimoPedido = Number(await AsyncStorage.getItem('pedidoBateriaEm') || 0);
+      if (Date.now() - ultimoPedido < 24 * 60 * 60 * 1000) return;
+      await AsyncStorage.setItem('pedidoBateriaEm', String(Date.now()));
+      Alert.alert(
+        'Ficar online com a tela bloqueada',
+        'Para o radar, o rádio e os alertas continuarem funcionando com a tela bloqueada ou com o app fechado, permita que o MIL-LIN funcione sem restrição de bateria.',
+        [
+          { text: 'Agora não', style: 'cancel' },
+          { text: 'Permitir', onPress: () => { AppOverlay.pedirSemRestricaoBateria().catch(() => {}); } },
+        ]
+      );
+    } catch { /* aparelho sem essa opção */ }
+  };
+
   const alternarStatus = async () => {
     const novoStatus = !statusOnline;
     const token = await AsyncStorage.getItem('tokenMotorista');
@@ -1011,6 +1055,7 @@ export default function Radar() {
           await enviarSinalDeVida();
           await motoristaFetch('/api/Corrida/retomar-fila', { method: 'POST' });
           await verificarCorridaAtiva();
+          garantirSemRestricaoBateria();
         }
       } else {
         const textoErro = await resposta.text();

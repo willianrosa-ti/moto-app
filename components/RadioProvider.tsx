@@ -8,6 +8,7 @@ import { RadioClient, type AlertaAvulso, type EstadoRadio } from '../services/ra
 import { radioMedia } from '../services/radio/media';
 import { criarHubNativo, radioNativoDisponivel } from '../services/radio/hubNativo';
 import IconeAlerta from './IconeAlerta';
+import IconeRadio from './IconeRadio';
 import { volumeBipe } from '../services/volumeBipe';
 import AppOverlay from '../native/AppOverlay';
 import { Audio } from 'expo-av';
@@ -115,7 +116,7 @@ export default function RadioProvider({ children }: { children: React.ReactNode 
     </Modal>
     <Modal transparent visible={ativo && (!!chamada || !!estado.erro || estado.preparando)} animationType="fade" onRequestClose={() => client.current?.end()}>
       <View style={s.backdrop}><View style={s.card} accessibilityViewIsModal>
-        <View style={s.icon}><Ionicons name="radio-outline" color="#065f46" size={32} /></View>
+        <View style={s.icon}><IconeRadio tamanho={32} cor="#065f46" /></View>
         <Text style={s.eyebrow}>RÁDIO PRIVADO</Text><Text style={s.name}>{outro?.nome || 'Rádio'}</Text>
         {!!chamada && <Text accessibilityLiveRegion="polite" style={s.status}>{texto}</Text>}
         {estado.preparando && <Text style={s.status}>Abrindo o rádio…</Text>}
@@ -127,7 +128,7 @@ export default function RadioProvider({ children }: { children: React.ReactNode 
         </>}
         {chamada?.status === 'Ativa' && <>
           <Pressable accessibilityRole="button" accessibilityLabel="Segure para falar no rádio" onPressIn={() => client.current?.press()} onPressOut={() => client.current?.release()} onTouchCancel={() => client.current?.release()} style={[s.talk, falando && s.talking]}>
-            <Ionicons name="radio" size={38} color="#fff" /><Text style={s.white}>{falando ? 'Falando…' : 'Segure para falar'}</Text>
+            <IconeRadio tamanho={38} cor="#fff" /><Text style={s.white}>{falando ? 'Falando…' : 'Segure para falar'}</Text>
           </Pressable><Text style={s.hint}>Espere o bipe para falar · solte para ouvir · até 20 s por fala</Text>
         </>}
         <Pressable style={s.end} onPress={() => client.current?.end()}><Text style={s.endText}>{chamada ? 'Encerrar rádio' : 'Fechar'}</Text></Pressable>

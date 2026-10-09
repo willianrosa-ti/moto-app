@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { motoristaFetch } from '../../services/motoristaApi';
 import { NIVEIS_BIPE, definirVolumeBipe, lerVolumeBipe } from '../../services/volumeBipe';
 import { tocarBipeTeste } from '../../components/RadioProvider';
+import IconeRadio from '../../components/IconeRadio';
 
 type Preferencias = {
   offlineRadio: boolean; radioDireto: boolean; offlineAlerta: boolean;
@@ -64,9 +65,12 @@ export default function Configuracoes() {
     tocarBipeTeste();
   }
 
+  // icone 'radio' = desenho do rádio (o mesmo do painel e do chat).
   const linha = (campo: keyof Preferencias, titulo: string, texto: string, icone: keyof typeof Ionicons.glyphMap, desativado = false) => (
     <View style={[s.linha, desativado && { opacity: 0.45 }]}>
-      <Ionicons name={icone} size={22} color={preferencias?.[campo] ? cor : '#64748b'} />
+      {icone === 'radio'
+        ? <IconeRadio tamanho={22} cor={preferencias?.[campo] ? cor : '#64748b'} />
+        : <Ionicons name={icone} size={22} color={preferencias?.[campo] ? cor : '#64748b'} />}
       <View style={{ flex: 1 }}>
         <Text style={s.opcaoTitulo}>{titulo}</Text>
         <Text style={s.texto}>{texto}</Text>
@@ -91,7 +95,7 @@ export default function Configuracoes() {
           <ScrollView contentContainerStyle={s.conteudo}>
             <View style={s.card}>
               <Text style={s.tituloCard}>Quando estiver ocupado, quero receber:</Text>
-              {linha('ocupadoRadio', 'Rádio', 'A agência e os colegas podem falar com você.', 'radio-outline')}
+              {linha('ocupadoRadio', 'Rádio', 'A agência e os colegas podem falar com você.', 'radio')}
               {linha('ocupadoAlerta', 'Alerta', 'Toca o BIP BIP ALERTA quando alguém chamar.', 'notifications-outline')}
               {!comunicacao && linha('ocupadoCorrida', 'Corrida', 'Continua recebendo as corridas oferecidas pela agência.', 'navigate-outline')}
               <Text style={s.nota}>O Ocupado liga e desliga no menu Recursos.</Text>
@@ -99,7 +103,7 @@ export default function Configuracoes() {
 
             <View style={s.card}>
               <Text style={s.tituloCard}>Quando estiver offline, quero receber:</Text>
-              {linha('offlineRadio', 'Rádio', 'A agência fala direto; os colegas mandam alerta e, no 3º, o rádio liga.', 'radio-outline')}
+              {linha('offlineRadio', 'Rádio', 'A agência fala direto; os colegas mandam alerta e, no 3º, o rádio liga.', 'radio')}
               {linha('radioDireto', 'Rádio direto', 'A voz sai na hora, sem precisar de alerta antes, também dos colegas.', 'radio', !preferencias.offlineRadio)}
               {linha('offlineAlerta', 'Alerta', 'Toca o BIP BIP ALERTA quando alguém chamar.', 'notifications-outline')}
               <Text style={s.nota}>Vale também com o app fechado, enquanto você continuar logado com “Manter conectado”.</Text>
