@@ -67,7 +67,7 @@ export default function ChatMotorista() {
   const nomeAgenciaRef = useRef('');
   const ativo = pathname.startsWith('/radar');
   useEffect(() => { if (radio.chamada) { setAberto(false); abertoRef.current = false; } }, [radio.chamada]);
-  useEffect(() => { if (colega && ativo) { setAbaColegas(true); setAberto(true); abertoRef.current = false; } }, [colega, ativo]);
+  useEffect(() => { if (colega && ativo && !comunicacao) { setAbaColegas(true); setAberto(true); abertoRef.current = false; } }, [colega, ativo, comunicacao]);
   useEffect(() => { abertoRef.current = aberto && !abaColegas; }, [aberto, abaColegas]);
   const carregarColegas = useCallback(async () => {
     try { const r = await motoristaFetch('/api/ChatDireto/colegas'); if (r.ok) setNaoLidasColegas((await r.json()).reduce((n: number, c: { naoLidas: number }) => n + c.naoLidas, 0)); } catch { /* consulta posterior recupera */ }
@@ -209,6 +209,8 @@ export default function ChatMotorista() {
   const [colegaEvento, setColegaEvento] = useState<number | undefined>();
   useEffect(() => {
     const sub = DeviceEventEmitter.addListener('abrirConversa', (d?: { perfil?: string; id?: number }) => {
+      // Na conta Comunicação, o chat de contatos já está na tela principal.
+      if (d?.perfil === 'Motorista' && comunicacaoRef.current) return;
       if (d?.perfil === 'Motorista' && d.id) { setColegaEvento(d.id); setAbaColegas(true); setAberto(true); abertoRef.current = false; }
       else { setAbaColegas(false); setAberto(true); abertoRef.current = true; acompanharRef.current = true; carregar(); }
     });
@@ -318,15 +320,15 @@ export default function ChatMotorista() {
     } catch (e) { setErro((e as Error).message); }
   }
 
-  if (!ativo || comunicacao) return null;
+  if (!ativo) return null;
   return <>
-    <Pressable accessibilityRole="button" accessibilityLabel={`Conversas, ${naoLidas + naoLidasColegas} mensagens não lidas`} style={[styles.fab, { bottom: insets.bottom + 22 }]} onPress={() => {
+    {!comunicacao && <Pressable accessibilityRole="button" accessibilityLabel={`Conversas, ${naoLidas + naoLidasColegas} mensagens não lidas`} style={[styles.fab, { bottom: insets.bottom + 22 }]} onPress={() => {
       abertoRef.current = true; acompanharRef.current = true; setAberto(true); carregar(); setTimeout(() => scrollRef.current?.scrollToEnd({ animated: false }), 100);
     }}>
       <Ionicons name="chatbubbles-outline" size={26} color="#fff" />
       {naoLidas + naoLidasColegas > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{naoLidas + naoLidasColegas > 99 ? '99+' : naoLidas + naoLidasColegas}</Text></View>}
-    </Pressable>
-    <Modal visible={aberto && !radio.chamada && !radio.preparando && !radio.erro} transparent animationType="slide" statusBarTranslucent navigationBarTranslucent onRequestClose={fechar}>
+    </Pressable>}
+    <Modal visible={aberto && !(comunicacao && abaColegas) && !radio.chamada && !radio.preparando && !radio.erro} transparent animationType="slide" statusBarTranslucent navigationBarTranslucent onRequestClose={fechar}>
       {/* O teclado empurra a conversa para cima (Android e iPhone), mantendo o campo de digitação visível. */}
       <EvitaTeclado style={styles.overlay}>
         <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Fechar conversa" onPress={fechar} />
@@ -338,11 +340,11 @@ export default function ChatMotorista() {
             {!abaColegas && <Pressable accessibilityRole="button" accessibilityLabel="Chamar a agência no rádio" onPress={biparAgencia} style={styles.close}><IconeRadio tamanho={24} cor="#047857" /></Pressable>}
             <Pressable accessibilityLabel="Fechar conversa" onPress={fechar} style={styles.close}><Ionicons name="close" size={25} color="#475569" /></Pressable>
           </View>
-          <View style={{ flexDirection: 'row', padding: 8, gap: 8 }}>
+          {!comunicacao && <View style={{ flexDirection: 'row', padding: 8, gap: 8 }}>
             <Pressable disabled={gravando || !!audioPendente || enviando} onPress={() => { setAbaColegas(false); abertoRef.current = true; carregar(); }} style={{ flex: 1, padding: 12, backgroundColor: !abaColegas ? '#d1fae5' : '#e2e8f0', borderRadius: 14 }}><Text style={{ textAlign: 'center', color: '#065f46', fontWeight: '700' }}>Agência{naoLidas ? ` (${naoLidas})` : ''}</Text></Pressable>
             <Pressable disabled={gravando || !!audioPendente || enviando} onPress={() => { setAbaColegas(true); abertoRef.current = false; }} style={{ flex: 1, padding: 12, backgroundColor: abaColegas ? '#d1fae5' : '#e2e8f0', borderRadius: 14 }}><Text style={{ textAlign: 'center', color: '#065f46', fontWeight: '700' }}>{comunicacao ? 'Contatos' : 'Motoristas'}{naoLidasColegas ? ` (${naoLidasColegas})` : ''}</Text></Pressable>
-          </View>
-          {abaColegas ? aberto && <ChatColegas inicial={colegaEvento || Number(colega) || undefined} /> : <>
+          </View>}
+          {abaColegas ? aberto && !comunicacao && <ChatColegas inicial={colegaEvento || Number(colega) || undefined} /> : <>
           <ScrollView ref={scrollRef} style={styles.history} contentContainerStyle={styles.messages} keyboardShouldPersistTaps="handled"
             scrollEventThrottle={100} onScroll={({ nativeEvent: e }) => { acompanharRef.current = e.contentSize.height - e.layoutMeasurement.height - e.contentOffset.y < 100; }}
             onContentSizeChange={() => { if (acompanharRef.current) scrollRef.current?.scrollToEnd({ animated: false }); }}

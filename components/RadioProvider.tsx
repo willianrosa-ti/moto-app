@@ -104,10 +104,9 @@ export default function RadioProvider({ children }: { children: React.ReactNode 
   }, [chamada?.falante, chamada?.falaAte]);
   const segundosFala = chamada?.falante && chamada.falaAte
     ? Math.max(0, Math.min(LIMITE_FALA_S, Math.ceil((Date.parse(chamada.falaAte) - agora) / 1000))) : null;
-  const restante = segundosFala === null ? '' : ` · ${segundosFala} s`;
   const alertas = chamada?.alertas || 0;
   const podeAlertar = chamada?.status === 'Tocando' && !recebendo && chamada.origem.chave === estado.eu?.chave && chamada.destino.perfil === 'Motorista';
-  const texto = chamada?.status === 'Tocando' ? recebendo ? 'Conectando o rádio…' : podeAlertar ? (alertas >= ALERTAS_PARA_CONECTAR ? 'Alerta 3/3 enviado · conectando o rádio…' : 'Chamando… se o colega não estiver no app, envie o alerta') : 'Chamando… conectando o rádio' : chamada?.status === 'Ativa' ? falando ? `Você está falando${restante}` : chamada.falante ? `${outro?.nome} está falando${restante}` : 'Canal livre' : 'Conectando áudio…';
+  const texto = chamada?.status === 'Tocando' ? recebendo ? 'Conectando o rádio…' : podeAlertar ? (alertas >= ALERTAS_PARA_CONECTAR ? 'Alerta 3/3 enviado · conectando o rádio…' : 'Chamando… se o colega não estiver no app, envie o alerta') : 'Chamando… conectando o rádio' : chamada?.status === 'Ativa' ? falando ? 'Você está falando' : chamada.falante ? 'Recebendo áudio' : 'Canal livre' : 'Conectando áudio…';
   const abrirConversa = (a: AlertaAvulso) => {
     setAlertaRecebido(null);
     // O chat (ChatMotorista) abre na conversa de quem mandou o alerta.
@@ -142,8 +141,10 @@ export default function RadioProvider({ children }: { children: React.ReactNode 
         {chamada?.status === 'Ativa' && <>
           <Pressable accessibilityRole="button" accessibilityLabel="Segure para falar no rádio" onPressIn={() => client.current?.press()} onPressOut={() => client.current?.release()} onTouchCancel={() => client.current?.release()} style={[s.talk, falando && s.talking]}>
             <IconeRadio tamanho={38} cor="#fff" />
-            {falando && segundosFala !== null && <Text style={[s.contagem, segundosFala <= 5 && s.contagemFim]}>{segundosFala} s</Text>}
-            <Text style={s.white}>{falando ? 'Falando…' : 'Segure para falar'}</Text>
+            {segundosFala !== null && <View pointerEvents="none" style={s.tempoFala}>
+              <Text accessibilityLabel={`${segundosFala} segundos restantes`} style={[s.contagem, segundosFala <= 5 && s.contagemFim]}>{segundosFala} s</Text>
+            </View>}
+            <Text numberOfLines={1} style={s.white}>{falando ? 'Falando…' : 'Segure para falar'}</Text>
           </Pressable><Text style={s.hint}>Espere o bipe para falar · solte para ouvir · até {LIMITE_FALA_S} s por fala</Text>
         </>}
         <Pressable style={s.end} onPress={() => client.current?.end()}><Text style={s.endText}>{chamada ? 'Encerrar rádio' : 'Fechar'}</Text></Pressable>
@@ -160,5 +161,6 @@ const s = StyleSheet.create({
   alerta: { backgroundColor: '#dc2626', padding: 18, borderRadius: 18, width: '100%', alignItems: 'center', gap: 6, marginTop: 8 },
   talk: { backgroundColor: '#047857', padding: 26, borderRadius: 24, width: '100%', alignItems: 'center', gap: 10, marginTop: 12 }, talking: { backgroundColor: '#ea580c' },
   white: { color: '#fff', fontWeight: '700', fontSize: 16 },
-  contagem: { color: '#fff', fontWeight: '800', fontSize: 34, fontVariant: ['tabular-nums'] }, contagemFim: { color: '#fef08a' }, hint: { color: '#64748b', fontSize: 12, textAlign: 'center' }, end: { padding: 16 }, endText: { color: '#b91c1c', fontWeight: '600' },
+  tempoFala: { position: 'absolute', top: 10, right: 10, minWidth: 48, height: 24, paddingHorizontal: 8, borderRadius: 12, backgroundColor: '#0003', alignItems: 'center', justifyContent: 'center' },
+  contagem: { color: '#fff', fontWeight: '800', fontSize: 12, lineHeight: 16, fontVariant: ['tabular-nums'] }, contagemFim: { color: '#fef08a' }, hint: { color: '#64748b', fontSize: 12, textAlign: 'center' }, end: { padding: 16 }, endText: { color: '#b91c1c', fontWeight: '600' },
 });

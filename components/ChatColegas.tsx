@@ -204,7 +204,13 @@ export default function ChatColegas({ inicial, embutido = false }: { inicial?: n
       <Pressable accessibilityRole="button" disabled={enviando || !novoTelefone.trim() || !novoApelido.trim()} onPress={adicionarContato} style={[s.botaoAdicionar, (enviando || !novoTelefone.trim() || !novoApelido.trim()) && { opacity: 0.5 }]}><Text style={s.textoBotao}>{enviando ? 'Adicionando…' : 'Adicionar contato'}</Text></Pressable>
     </View>}
     {!!aviso && <Text accessibilityLiveRegion="polite" style={s.aviso}>{aviso}</Text>}
-    <ScrollView keyboardShouldPersistTaps="handled">{lista.map(c => {
+    <ScrollView keyboardShouldPersistTaps="handled">
+      {embutido && comunicacao && <Pressable accessibilityRole="button" accessibilityLabel="Conversar com a agência" style={[s.contact, s.contactEmbutido]} onPress={() => DeviceEventEmitter.emit('abrirConversa', { perfil: 'Agencia' })}>
+        <View style={s.avatar}><Ionicons name="headset-outline" size={22} color="#047857" /></View>
+        <View style={{ flex: 1 }}><Text style={s.name}>Sua agência</Text><Text style={s.small}>Mensagens, áudio e rádio</Text></View>
+        <Ionicons name="chevron-forward" size={20} color="#64748b" />
+      </Pressable>}
+      {lista.map(c => {
       const ultima = comunicacao ? ultimaDe(c) : null;
       return <Pressable key={c.id} style={[s.contact, embutido && s.contactEmbutido]} onPress={() => setSelecionado(c.id)} onLongPress={comunicacao ? () => removerContato(c) : undefined} delayLongPress={600}>
         <View style={s.avatar}><Ionicons name="person-outline" size={22} color="#047857" /></View>
