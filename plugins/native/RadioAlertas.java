@@ -60,9 +60,9 @@ public final class RadioAlertas {
         }
     }
 
-    // Volume do PRI RADIO (Configurações do app), separado do volume da voz: 0 = mudo, 1 = normal.
+    // Volume do PRI RADIO (Configurações do app), separado do volume da voz: 0 = mudo, 1 = normal. Começa em 5%.
     public static float volumeBipe(Context context) {
-        return context.getSharedPreferences("millin_radio", Context.MODE_PRIVATE).getFloat("volumeBipe", 1f);
+        return context.getSharedPreferences("millin_radio", Context.MODE_PRIVATE).getFloat("volumeBipe", 0.05f);
     }
 
     public static void definirVolumeBipe(Context context, float volume) {

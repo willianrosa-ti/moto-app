@@ -135,9 +135,14 @@ public class RideMonitorService extends Service {
     private void atualizarCredenciais(Intent intent) {
         if (intent == null) return;
 
-        radarAtivo = intent.getBooleanExtra("radarAtivo", true);
-        comunicacaoOnline = intent.getBooleanExtra("comunicacaoOnline", false);
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean("radarAtivo", radarAtivo).putBoolean("comunicacaoOnline", comunicacaoOnline).apply();
+        // Só o app manda o estado do radar. Religado pelo Android (celular ligado, app atualizado) o pedido vem
+        // sem ele: vale o que ficou guardado (antes, o radar de quem estava desligado ligava e a conta de
+        // comunicação perdia o "online" até o app ser aberto).
+        if (intent.hasExtra("radarAtivo") || intent.hasExtra("comunicacaoOnline")) {
+            radarAtivo = intent.getBooleanExtra("radarAtivo", true);
+            comunicacaoOnline = intent.getBooleanExtra("comunicacaoOnline", false);
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean("radarAtivo", radarAtivo).putBoolean("comunicacaoOnline", comunicacaoOnline).apply();
+        }
         if (intent.hasExtra("refreshToken")) {
             try { DriverSessionSecrets.save(this, intent.getStringExtra("refreshToken")); } catch (Exception ignored) { }
         }

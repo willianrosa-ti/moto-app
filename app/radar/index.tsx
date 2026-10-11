@@ -13,9 +13,10 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import * as Updates from 'expo-updates';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppStateStatus } from 'react-native';
-import { Alert, Animated, AppState, Easing, KeyboardAvoidingView, Linking, Modal, PermissionsAndroid, Platform, ScrollView, StatusBar, StyleSheet, Switch, Text, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
+import { Alert, Animated, AppState, Easing, Linking, Modal, PermissionsAndroid, Platform, ScrollView, StatusBar, StyleSheet, Switch, Text, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
 import { avisarAgenciaComunicacao } from '../../services/agenciaComunicacao';
 import ChatColegas from '../../components/ChatColegas';
+import EvitaTeclado from '../../components/EvitaTeclado';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const ficheiroBuzina = require('../../assets/sounds/buzina.mp3');
@@ -1437,7 +1438,7 @@ export default function Radar() {
 
       {/* Conta só de comunicação: a tela principal é a lista de contatos e últimas conversas (tipo WhatsApp). */}
       {comunicacao ? (
-        <KeyboardAvoidingView style={{ flex: 1, backgroundColor: '#f1f5f9' }} behavior={Platform.OS === 'web' ? undefined : 'padding'}>
+        <EvitaTeclado style={{ flex: 1, backgroundColor: '#f1f5f9' }}>
           <WebPwaNotice corPrimaria={temaAgencia.corPrimaria} />
           {(!statusOnline || ocupado) && (
             <Text style={{ backgroundColor: ocupado ? '#fef3c7' : '#e2e8f0', color: '#334155', fontSize: 12, paddingVertical: 8, paddingHorizontal: 14, textAlign: 'center' }}>
@@ -1445,7 +1446,7 @@ export default function Radar() {
             </Text>
           )}
           <ChatColegas embutido />
-        </KeyboardAvoidingView>
+        </EvitaTeclado>
       ) : (
       <ScrollView contentContainerStyle={styles.conteudoRadar}>
         <WebPwaNotice corPrimaria={temaAgencia.corPrimaria} />

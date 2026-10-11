@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { motoristaFetch } from '../../services/motoristaApi';
-import { NIVEIS_BIPE, definirVolumeBipe, lerVolumeBipe } from '../../services/volumeBipe';
+import { NIVEIS_BIPE, VOLUME_BIPE_PADRAO, definirVolumeBipe, lerVolumeBipe } from '../../services/volumeBipe';
 import { tocarBipeTeste } from '../../components/RadioProvider';
 import IconeRadio from '../../components/IconeRadio';
 
@@ -22,7 +22,7 @@ export default function Configuracoes() {
   const [cor, setCor] = useState('#28a745');
   const [preferencias, setPreferencias] = useState<Preferencias | null>(null);
   const [comunicacao, setComunicacao] = useState(false);
-  const [volume, setVolume] = useState(1);
+  const [volume, setVolume] = useState(VOLUME_BIPE_PADRAO);
   const [salvando, setSalvando] = useState(false);
   const [mensagem, setMensagem] = useState(''); const [erro, setErro] = useState('');
 

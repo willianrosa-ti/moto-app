@@ -49,6 +49,9 @@ export default function ChatColegas({ inicial, embutido = false }: { inicial?: n
   const [tempo, setTempo] = useState(0); const [audio, setAudio] = useState<AudioPendente | null>(null);
   const gravador = useRef<GravacaoAtiva | null>(null), pendente = useRef<{ texto: string; id: string } | null>(null);
   const trava = useRef(false), ciclo = useRef(0), scroll = useRef<ScrollView>(null);
+  // Na última mensagem (abre lá e acompanha as novas); quem rola para cima para ler as antigas não é puxado de volta.
+  const noFim = useRef(true);
+  const irParaOFim = () => { if (noFim.current) scroll.current?.scrollToEnd({ animated: false }); };
   const { chamar, alertar } = useRadio();
   // Conta só de comunicação: aparecem só os contatos (quem você adicionou ou quem adicionou você).
   const comunicacao = useAgenciaComunicacao();
@@ -119,7 +122,7 @@ export default function ChatColegas({ inicial, embutido = false }: { inicial?: n
     lista.forEach(m => { if (m.audioId) obterUriAudio(m.audioId).catch(() => {}); });
   }, [eu, selecionado]);
   useEffect(() => {
-    const versao = ++ciclo.current; setMensagens([]); setTexto(''); setErro(''); setAnteriores(false); pendente.current = null;
+    const versao = ++ciclo.current; setMensagens([]); setTexto(''); setErro(''); setAnteriores(false); pendente.current = null; noFim.current = true;
     if (!selecionado || !eu) return;
     abrirColega(selecionado);
     let ocupado = false;
@@ -180,7 +183,7 @@ export default function ChatColegas({ inicial, embutido = false }: { inicial?: n
         dados = { texto: pendente.current.texto, clienteId: pendente.current.id };
       }
       adicionar([await api(`/${selecionado}/mensagens`, dados)]); setTexto(''); setAudio(null); pendente.current = null; setErro('');
-      setTimeout(() => scroll.current?.scrollToEnd({ animated: true }), 60);
+      noFim.current = true; setTimeout(() => scroll.current?.scrollToEnd({ animated: true }), 60);
     } catch (e) { setErro(`${(e as Error).message} O envio foi preservado.`); }
     finally { trava.current = false; setEnviando(false); }
   }
@@ -224,7 +227,9 @@ export default function ChatColegas({ inicial, embutido = false }: { inicial?: n
     </View>
     {colega && <Text style={s.situacao}>{situacao(colega)}</Text>}
     {!!aviso && <Text accessibilityLiveRegion="polite" style={s.aviso}>{aviso}</Text>}
-    <ScrollView ref={scroll} contentContainerStyle={s.messages} keyboardShouldPersistTaps="handled">
+    <ScrollView ref={scroll} contentContainerStyle={s.messages} keyboardShouldPersistTaps="handled"
+      scrollEventThrottle={100} onScroll={({ nativeEvent: e }) => { noFim.current = e.contentSize.height - e.layoutMeasurement.height - e.contentOffset.y < 100; }}
+      onContentSizeChange={irParaOFim} onLayout={irParaOFim}>
       {anteriores && <Pressable onPress={async () => { try { const d = await api(`/${selecionado}/mensagens?antesId=${mensagens[0]?.id}`); adicionar(d.mensagens); setAnteriores(d.temAnteriores); } catch (e) { setErro((e as Error).message); } }}><Text style={s.older}>Carregar anteriores</Text></Pressable>}
       {!mensagens.length && <Text style={s.empty}>Envie uma mensagem ou um áudio para iniciar a conversa.</Text>}
       {mensagens.map(m => <View key={m.id} style={[s.bubble, m.remetenteMotoristaId === eu ? s.sent : s.received]}>
@@ -234,7 +239,8 @@ export default function ChatColegas({ inicial, embutido = false }: { inicial?: n
     </ScrollView>
     {!!erro && <Text accessibilityRole="alert" style={s.error}>{erro}</Text>}
     <View style={s.composer}>
-      {gravando || audio ? <><Text style={[s.text, { flex: 1 }]}>{gravando ? `Gravando ${formatarDuracao(tempo)}` : `Áudio · ${formatarDuracao(audio?.duracaoMs)}`}</Text><Pressable disabled={enviando} accessibilityLabel="Descartar áudio" onPress={() => { gravador.current?.cancelar(); gravador.current = null; setGravando(false); setAudio(null); }}><Ionicons name="trash-outline" color="#b91c1c" size={22} /></Pressable></> : <TextInput value={texto} onChangeText={setTexto} style={s.input} placeholderTextColor="#475569" editable={!enviando} placeholder="Mensagem…" accessibilityLabel="Mensagem para o motorista" maxLength={2000} multiline />}
+      {gravando || audio ? <><Text style={[s.text, { flex: 1 }]}>{gravando ? `Gravando ${formatarDuracao(tempo)}` : `Áudio · ${formatarDuracao(audio?.duracaoMs)}`}</Text><Pressable disabled={enviando} accessibilityLabel="Descartar áudio" onPress={() => { gravador.current?.cancelar(); gravador.current = null; setGravando(false); setAudio(null); }}><Ionicons name="trash-outline" color="#b91c1c" size={22} /></Pressable></> : <TextInput value={texto} onChangeText={setTexto} style={s.input} placeholderTextColor="#475569" editable={!enviando} placeholder="Mensagem…" accessibilityLabel="Mensagem para o motorista" maxLength={2000} multiline
+        onFocus={() => { noFim.current = true; setTimeout(() => scroll.current?.scrollToEnd({ animated: true }), 250); }} />}
       <Pressable disabled={enviando} onPress={gravando || audio || texto.trim() ? enviar : gravar} accessibilityLabel={gravando || audio || texto.trim() ? 'Enviar mensagem' : 'Gravar áudio'} style={s.send}><Ionicons name={gravando || audio || texto.trim() ? 'arrow-up' : 'mic'} size={24} color="#fff" /></Pressable>
     </View>
   </View>;

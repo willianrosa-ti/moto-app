@@ -3,7 +3,7 @@ import * as signalR from '@microsoft/signalr';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useGlobalSearchParams, usePathname, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, DeviceEventEmitter, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, AppState, DeviceEventEmitter, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppOverlay from '../native/AppOverlay';
 import { emitirAvisoRecebido } from '../services/avisos';
@@ -12,6 +12,7 @@ import PlayerAudio from './PlayerAudio';
 import ChatColegas from './ChatColegas';
 import IconeAlerta from './IconeAlerta';
 import IconeRadio from './IconeRadio';
+import EvitaTeclado from './EvitaTeclado';
 import { useAgenciaComunicacao } from '../services/agenciaComunicacao';
 import { useRadio } from './RadioProvider';
 import { colegaAberto, emitirDireta, guardarDiretas, type MensagemDireta } from '../services/chatDireto';
@@ -327,7 +328,7 @@ export default function ChatMotorista() {
     </Pressable>
     <Modal visible={aberto && !radio.chamada && !radio.preparando && !radio.erro} transparent animationType="slide" statusBarTranslucent navigationBarTranslucent onRequestClose={fechar}>
       {/* O teclado empurra a conversa para cima (Android e iPhone), mantendo o campo de digitação visível. */}
-      <KeyboardAvoidingView style={styles.overlay} behavior={Platform.OS === 'web' ? undefined : 'padding'}>
+      <EvitaTeclado style={styles.overlay}>
         <Pressable style={StyleSheet.absoluteFill} accessibilityLabel="Fechar conversa" onPress={fechar} />
         <View style={[styles.panel, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           <View style={styles.header}>
@@ -375,7 +376,7 @@ export default function ChatMotorista() {
           </View>
           </>}
         </View>
-      </KeyboardAvoidingView>
+      </EvitaTeclado>
     </Modal>
   </>;
 }

@@ -159,7 +159,8 @@ export class RadioClient {
     const minhaVez = Boolean(valid && this.held && c.falante === this.state.eu?.chave);
     const esperaBipe = minhaVez ? (this.micLiberadoEm || 0) - Date.now() : 0;
     if (esperaBipe > 0) this.bipeTimer = setTimeout(() => this.applyFloor(), esperaBipe);
-    if (remaining > 0) this.floorTimer = setTimeout(() => { this.held = false; this.applyFloor(); }, Math.min(remaining + 10, 20010));
+    // Cada fala vai até 30 s (o servidor corta no mesmo tempo).
+    if (remaining > 0) this.floorTimer = setTimeout(() => { this.held = false; this.applyFloor(); }, Math.min(remaining + 10, 30010));
     const modo = minhaVez && esperaBipe <= 0 ? 'enviando' : this.held && c?.status === 'Ativa' && this.state.conectado ? 'pronto' : 'parado';
     return this.microfone(modo);
   }

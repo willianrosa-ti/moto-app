@@ -67,6 +67,8 @@ function adicionarServicoMonitor(manifest) {
       $: { 'android:name': nomeReceptor, 'android:exported': 'true' },
       'intent-filter': [{ action: [
         { $: { 'android:name': 'android.intent.action.BOOT_COMPLETED' } },
+        { $: { 'android:name': 'android.intent.action.QUICKBOOT_POWERON' } },
+        { $: { 'android:name': 'com.htc.intent.action.QUICKBOOT_POWERON' } },
         { $: { 'android:name': 'android.intent.action.MY_PACKAGE_REPLACED' } },
       ] }],
     });
